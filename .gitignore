@@ -1,0 +1,8 @@
+node_modules
+dist
+public/pdfjs
+src-tauri/target
+src-tauri/gen
+*.log
+.claude/
+*.tsbuildinfo

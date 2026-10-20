@@ -1,0 +1,28 @@
+[package]
+name = "pdfiiuum"
+version = "0.1.0"
+description = "Lector de PDF ligero"
+license = "GPL-3.0-or-later"
+edition = "2021"
+
+[lib]
+name = "pdfiiuum_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+pdfium-render = "0.9.4"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-single-instance = "2.5.4"
+urlencoding = "2"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

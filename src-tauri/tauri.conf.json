@@ -1,0 +1,57 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "pdfiiuum",
+  "version": "0.1.0",
+  "identifier": "com.pdfiiuum.app",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "pdfiiuum",
+        "width": 1280,
+        "height": 860,
+        "minWidth": 720,
+        "minHeight": 480,
+        "theme": "Dark",
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "lib/pdfium.dll": "pdfium.dll",
+      "lib/PDFIUM-LICENSE": "PDFIUM-LICENSE"
+    },
+    "publisher": "pdfiiuum",
+    "copyright": "© 2026 pdfiiuum",
+    "category": "Productivity",
+    "shortDescription": "Lector de PDF ligero",
+    "longDescription": "Lector de PDF para Windows con resaltado, subrayado, tachado, comentarios, texto y dibujo.",
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "languages": ["Spanish"],
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "installerHooks": "windows/hooks.nsh"
+      }
+    }
+  }
+}
