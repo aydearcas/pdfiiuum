@@ -64,7 +64,13 @@ export default function TopBar(p: Props) {
   return (
     <header className="topbar">
       <div className="topbar-group">
-        <IconButton icon={PanelLeft} label="Miniaturas" active={p.sidebarOpen} disabled={!p.hasDoc} onClick={p.onToggleSidebar} />
+        <IconButton
+          icon={PanelLeft}
+          label={p.sidebarOpen ? "Ocultar panel lateral" : "Mostrar panel lateral"}
+          active={p.sidebarOpen}
+          disabled={!p.hasDoc}
+          onClick={p.onToggleSidebar}
+        />
         <span className="divider" />
         <IconButton icon={FolderOpen} label="Abrir (Ctrl+O)" onClick={p.onOpen} />
         <IconButton

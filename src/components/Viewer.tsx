@@ -34,6 +34,8 @@ export interface ViewerHandle {
   rotate(): void;
   find(query: string, opts?: { again?: boolean; previous?: boolean }): void;
   clearFind(): void;
+  /** Va al destino de un marcador del PDF. */
+  goToDest(dest: string | unknown[]): void;
   /** Lleva a la vista el punto (x, y en coordenadas PDF) de una página, sin cambiar el zoom. */
   scrollTo(page: number, x: number, y: number): void;
   /** Vuelve a leer la selección de texto actual. */
@@ -69,6 +71,7 @@ export default function Viewer(props: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<PDFViewer | null>(null);
   const busRef = useRef<EventBus | null>(null);
+  const linkRef = useRef<PDFLinkService | null>(null);
   const hosts = useRef(new Map<number, HTMLDivElement>());
   const [layoutTick, setLayoutTick] = useState(0);
   const toolRef = useRef(tool);
@@ -92,7 +95,8 @@ export default function Viewer(props: Props) {
       imageResourcesPath: IMAGE_RESOURCES,
     });
     linkService.setViewer(viewer);
-    viewerRef.current = viewer;    busRef.current = eventBus;
+    viewerRef.current = viewer;
+    linkRef.current = linkService;    busRef.current = eventBus;
 
     eventBus.on("pagesinit", () => {
       const init = cbs.current.initialView;
@@ -281,6 +285,9 @@ export default function Viewer(props: Props) {
       clearFind: () => {
         busRef.current?.dispatch("findbarclose", { source: null });
         cbs.current.onFindStatus(null);
+      },
+      goToDest: (dest) => {
+        linkRef.current?.goToDestination(dest as string | unknown[]);
       },
       scrollTo: (page, x, y) => {
         viewerRef.current?.scrollPageIntoView({

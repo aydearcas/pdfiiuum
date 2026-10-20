@@ -20,7 +20,7 @@ export default function Thumbnails({ doc, currentPage, onSelect }: Props) {
   }, [currentPage]);
 
   return (
-    <aside className="thumbs" ref={listRef}>
+    <div className="thumbs" ref={listRef}>
       {pages.map((n) => (
         <Thumb
           key={n}
@@ -31,7 +31,7 @@ export default function Thumbnails({ doc, currentPage, onSelect }: Props) {
           onClick={() => onSelect(n)}
         />
       ))}
-    </aside>
+    </div>
   );
 }
 

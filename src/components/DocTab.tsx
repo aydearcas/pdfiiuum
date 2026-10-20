@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { Copy } from "lucide-react";
-import Thumbnails from "./Thumbnails";
+import LeftPanel, { type LeftView } from "./LeftPanel";
+import { loadOutline, type OutlineNode } from "../lib/outline";
 import SearchBar from "./SearchBar";
 import SelectionMenu, { type MenuItem } from "./SelectionMenu";
 import Viewer, { type FindStatus, type ViewState, type ViewerHandle } from "./Viewer";
@@ -68,6 +69,8 @@ interface Props {
   tool: Tool;
   toolStyle: ToolStyle;
   sidebarOpen: boolean;
+  leftCollapsed: boolean;
+  onToggleLeftCollapsed(): void;
   commentsOpen: boolean;
   onToggleComments(): void;
   ref?: Ref<DocTabHandle>;
@@ -102,6 +105,26 @@ export default function DocTab(p: Props) {
   useEffect(() => {
     getUserName().then(setAuthor);
   }, []);
+
+  // Marcadores: la primera vez se abre la vista de marcadores si el PDF tiene índice.
+  const [outline, setOutline] = useState<OutlineNode[]>([]);
+  const [outlineLoading, setOutlineLoading] = useState(true);
+  const [leftView, setLeftView] = useState<LeftView | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setOutlineLoading(true);
+    loadOutline(doc.pdf)
+      .catch(() => [])
+      .then((nodes) => {
+        if (cancelled) return;
+        setOutline(nodes);
+        setOutlineLoading(false);
+        setLeftView((v) => v ?? (nodes.length ? "outline" : "thumbs"));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [doc.pdf]);
 
   // Comentarios ya guardados en el PDF (se vuelven a leer al guardar, porque cambia el documento).
   useEffect(() => {
@@ -343,7 +366,18 @@ export default function DocTab(p: Props) {
   return (
     <div className={`doc-tab${active ? " active" : ""}`} aria-hidden={!active}>
       {p.sidebarOpen && (
-        <Thumbnails doc={doc.pdf} currentPage={page} onSelect={(n) => viewer.current?.goToPage(n)} />
+        <LeftPanel
+          doc={doc.pdf}
+          outline={outline}
+          outlineLoading={outlineLoading}
+          view={leftView ?? "thumbs"}
+          collapsed={p.leftCollapsed}
+          currentPage={page}
+          onView={setLeftView}
+          onToggleCollapsed={p.onToggleLeftCollapsed}
+          onGoToPage={(n) => viewer.current?.goToPage(n)}
+          onGoToDest={(d) => viewer.current?.goToDest(d)}
+        />
       )}
       <main className="stage">
         <Viewer

@@ -12,7 +12,8 @@ export default defineConfig({
     strictPort: true,
     host: host || false,
     hmr: host ? { protocol: "ws", host, port: 1421 } : undefined,
-    watch: { ignored: ["**/src-tauri/**"] },
+    // En Windows el vigilante nativo a veces se salta ediciones seguidas: sondeo.
+    watch: { ignored: ["**/src-tauri/**"], usePolling: true, interval: 200 },
   },
   build: {
     target: "es2022",
