@@ -59,25 +59,62 @@ fn write_pdf(request: Request<'_>) -> Result<(), String> {
     write_atomic(&target_path(&request)?, raw_body(&request)?)
 }
 
-/// Cuerpo: [longitud del JSON (u32 LE)][JSON de anotaciones][PDF original].
-/// Escribe el PDF con las anotaciones y lo devuelve para que la interfaz lo recargue.
-#[tauri::command]
-async fn save_annotated(request: Request<'_>, pdfium: tauri::State<'_, PdfiumPath>) -> Result<Response, String> {
-    let path = target_path(&request)?;
-    let body = raw_body(&request)?;
+/// [longitud (u32 LE)][JSON][binario]: formato de los mensajes con datos y PDF a la vez.
+fn split_framed(body: &[u8]) -> Result<(&[u8], &[u8]), String> {
     if body.len() < 4 {
         return Err("Cuerpo incompleto".into());
     }
     let json_len = u32::from_le_bytes(body[..4].try_into().unwrap()) as usize;
     let json = body.get(4..4 + json_len).ok_or("Cuerpo incompleto")?;
-    let annots: Vec<pdf_engine::Annot> = serde_json::from_slice(json).map_err(|e| e.to_string())?;
-    let pdf = body[4 + json_len..].to_vec();
+    Ok((json, &body[4 + json_len..]))
+}
+
+fn framed(json: &[u8], bin: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(4 + json.len() + bin.len());
+    out.extend_from_slice(&(json.len() as u32).to_le_bytes());
+    out.extend_from_slice(json);
+    out.extend_from_slice(bin);
+    out
+}
+
+#[derive(serde::Deserialize)]
+struct SaveRequest {
+    /// Originales del PDF borradas o modificadas: [página, índice].
+    #[serde(default)]
+    remove: Vec<[i32; 2]>,
+    /// Anotaciones que hay que escribir (nuevas y versiones modificadas).
+    add: Vec<pdf_engine::Annot>,
+}
+
+/// Cuerpo: [longitud del JSON (u32 LE)][JSON {remove, add}][PDF original].
+/// Escribe el PDF con las anotaciones y lo devuelve para que la interfaz lo recargue.
+#[tauri::command]
+async fn save_annotated(request: Request<'_>, pdfium: tauri::State<'_, PdfiumPath>) -> Result<Response, String> {
+    let path = target_path(&request)?;
+    let (json, pdf) = split_framed(raw_body(&request)?)?;
+    let req: SaveRequest = serde_json::from_slice(json).map_err(|e| e.to_string())?;
+    let pdf = pdf.to_vec();
     let dll = pdfium.0.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
-        let out = pdf_engine::apply_annotations(&dll, &pdf, &annots)?;
+        let out = pdf_engine::apply_annotations(&dll, &pdf, &req.remove, &req.add)?;
         write_atomic(&path, &out)?;
         Ok(Response::new(out))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Cuerpo: el PDF. Respuesta: [longitud (u32 LE)][JSON de anotaciones editables][PDF para
+/// mostrar, sin esas anotaciones; vacío si no había ninguna].
+#[tauri::command]
+async fn extract_annotations(request: Request<'_>, pdfium: tauri::State<'_, PdfiumPath>) -> Result<Response, String> {
+    let pdf = raw_body(&request)?.to_vec();
+    let dll = pdfium.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let ex = pdf_engine::extract_annotations(&dll, &pdf)?;
+        let json = serde_json::to_vec(&ex.annots).map_err(|e| e.to_string())?;
+        Ok(Response::new(framed(&json, ex.display.as_deref().unwrap_or(&[]))))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -144,6 +181,7 @@ pub fn run() {
             read_pdf,
             write_pdf,
             save_annotated,
+            extract_annotations,
             user_name,
             windows::drop_tab,
             windows::take_window_payload

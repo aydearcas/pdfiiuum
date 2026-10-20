@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
 import { Copy } from "lucide-react";
 import LeftPanel, { type LeftView } from "./LeftPanel";
 import { loadOutline, type OutlineNode } from "../lib/outline";
 import SearchBar from "./SearchBar";
 import SelectionMenu, { type MenuItem } from "./SelectionMenu";
 import Viewer, { type FindStatus, type ViewState, type ViewerHandle } from "./Viewer";
-import { closePdf, loadPdf, type PDFDocument } from "../lib/pdf";
+import { closePdf, type PDFDocument } from "../lib/pdf";
 import CommentsPanel, { sortItems, type PanelItem } from "./CommentsPanel";
-import { bounds, newId, pdfDate, toNative, type Annot, type MarkupKind } from "../lib/annotations";
-import { readSavedAnnots, type SavedAnnot } from "../lib/savedAnnots";
+import { bounds, diffAnnots, newId, pdfDate, toNative, type Annot, type MarkupKind } from "../lib/annotations";
+import { openDocument } from "../lib/document";
 import type { TextSelection } from "../lib/selection";
 import type { Tool, ToolStyle } from "../lib/tools";
 import { useAnnotations } from "../lib/useAnnotations";
@@ -21,7 +21,9 @@ export interface TabInit {
   bytes: Uint8Array;
   name: string;
   path: string | null;
-  /** Anotaciones pendientes traídas de otra ventana. */
+  /** Anotaciones que ya tiene el PDF en disco (editables). */
+  baseline: Annot[];
+  /** Estado de las anotaciones traído de otra ventana (incluye cambios sin guardar). */
   annots?: Annot[];
   view?: ViewState;
 }
@@ -93,13 +95,13 @@ export default function DocTab(p: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const history = useAnnotations(p.init.annots);
+  const history = useAnnotations(p.init.annots ?? p.init.baseline);
   const { annots } = history;
-  const dirty = annots.length > 0;
+  // Cambios respecto a lo guardado en el PDF (nuevas, modificadas o borradas).
+  const changes = useMemo(() => diffAnnots(doc.baseline, annots), [doc.baseline, annots]);
+  const dirty = changes.dirty;
   const viewer = useRef<ViewerHandle>(null);
   const [author, setAuthor] = useState("");
-  const [saved, setSaved] = useState<SavedAnnot[]>([]);
-  const [loadingSaved, setLoadingSaved] = useState(true);
   const docRef = useRef(doc);
 
   useEffect(() => {
@@ -126,21 +128,11 @@ export default function DocTab(p: Props) {
     };
   }, [doc.pdf]);
 
-  // Comentarios ya guardados en el PDF (se vuelven a leer al guardar, porque cambia el documento).
-  useEffect(() => {
-    let cancelled = false;
-    setLoadingSaved(true);
-    readSavedAnnots(doc.pdf, () => cancelled)
-      .then((list) => !cancelled && setSaved(list))
-      .catch(() => !cancelled && setSaved([]))
-      .finally(() => !cancelled && setLoadingSaved(false));
-    return () => {
-      cancelled = true;
-    };
-  }, [doc.pdf]);
   docRef.current = doc;
   const annotsRef = useRef(annots);
   annotsRef.current = annots;
+  const changesRef = useRef(changes);
+  changesRef.current = changes;
 
   // Libera el PDF al cerrar la pestaña. Se aplaza un instante porque en desarrollo
   // React desmonta y vuelve a montar cada componente una vez (StrictMode).
@@ -198,27 +190,28 @@ export default function DocTab(p: Props) {
       // Cierra cualquier editor de texto abierto para que su contenido entre en el guardado.
       (document.activeElement as HTMLElement | null)?.blur();
       await new Promise((r) => setTimeout(r, 0));
-      const pending = annotsRef.current;
+      const { remove, add, dirty: hasChanges } = changesRef.current;
       setSaving(true);
       try {
-        if (pending.length === 0) {
-          const bytes = await d.pdf.saveDocument();
-          const target = await savePdf(bytes, d.name, d.path, saveAs || !isTauri);
+        if (!hasChanges) {
+          // Sin cambios: el archivo tal cual (pdf.js muestra una copia sin las anotaciones).
+          const target = await savePdf(d.bytes, d.name, d.path, saveAs || !isTauri);
           if (!target) return;
           if (isTauri && target !== d.path) setDoc({ ...d, name: baseName(target), path: target });
           notify(isTauri ? `Guardado: ${baseName(target)}` : "Descarga iniciada");
           return;
         }
-        const result = await saveAnnotated(d.bytes, pending.map(toNative), d.name, d.path, saveAs);
+        const result = await saveAnnotated(d.bytes, { remove, add: add.map(toNative) }, d.name, d.path, saveAs);
         if (!result) return;
-        // Recarga el PDF guardado: las anotaciones pasan a formar parte del documento.
+        // Recarga lo guardado: sus anotaciones vuelven a ser la base editable.
         const view = viewer.current?.viewState();
-        const pdf = await loadPdf(result.bytes);
+        const reopened = await openDocument(result.bytes);
         closePdf(d.pdf);
-        setDoc({ pdf, bytes: result.bytes, name: baseName(result.path), path: result.path, view });
-        history.reset();
+        setDoc({ ...reopened, bytes: result.bytes, name: baseName(result.path), path: result.path, view });
+        history.reset(reopened.baseline);
         clearSelection();
-        notify(`Guardado con ${pending.length} anotación${pending.length === 1 ? "" : "es"}: ${baseName(result.path)}`);
+        const n = add.length + remove.filter((o) => !add.some((a) => a.origin?.[0] === o[0] && a.origin?.[1] === o[1])).length;
+        notify(`Guardado (${n} cambio${n === 1 ? "" : "s"} en anotaciones): ${baseName(result.path)}`);
       } catch (e) {
         notify(`Error al guardar: ${e instanceof Error ? e.message : e}`, true);
       } finally {
@@ -310,10 +303,9 @@ export default function DocTab(p: Props) {
     [save, history.undo, history.redo, selectedId, onDelete, clearSelection],
   );
 
-  // Panel lateral: notas y marcas, guardadas y pendientes, en orden de lectura.
-  const panelItems = sortItems([
-    ...saved.map<PanelItem>((s) => ({ ...s, key: `saved-${s.id}`, pending: false })),
-    ...annots.flatMap<PanelItem>((a) =>
+  // Panel lateral: notas y marcas en orden de lectura; «Sin guardar» las nuevas o cambiadas.
+  const panelItems = sortItems(
+    annots.flatMap<PanelItem>((a) =>
       a.kind === "note" || "rects" in a
         ? [
             {
@@ -326,19 +318,17 @@ export default function DocTab(p: Props) {
               quote: "quote" in a ? a.quote : "",
               contents: a.contents ?? "",
               rect: bounds(a),
-              pending: true,
+              pending: changes.changedIds.has(a.id),
             },
           ]
         : [],
     ),
-  ]);
+  );
 
   const pickItem = (it: PanelItem) => {
     viewer.current?.scrollTo(it.page, it.rect[0], it.rect[3]);
-    if (it.pending) {
-      setTool("select");
-      setSelectedId(it.key);
-    } else setSelectedId(null);
+    setTool("select");
+    setSelectedId(it.key);
   };
 
   const closeTextMenu = useCallback(() => setTextSel(null), []);
@@ -422,7 +412,7 @@ export default function DocTab(p: Props) {
       <CommentsPanel
         open={p.commentsOpen}
         items={panelItems}
-        loading={loadingSaved}
+        loading={false}
         selectedKey={selectedId}
         onToggle={p.onToggleComments}
         onPick={pickItem}

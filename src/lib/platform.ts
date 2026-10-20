@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import type { NativeExisting } from "./annotations";
 
 export const isTauri = "__TAURI_INTERNALS__" in window;
 
@@ -83,7 +84,7 @@ export async function savePdf(
  */
 export async function saveAnnotated(
   original: Uint8Array,
-  annots: unknown[],
+  changes: { remove: [number, number][]; add: unknown[] },
   suggestedName: string,
   path: string | null,
   forceDialog: boolean,
@@ -91,15 +92,32 @@ export async function saveAnnotated(
   if (!isTauri) throw new Error("Guardar anotaciones solo está disponible en la app de escritorio.");
   const target = await chooseTarget(suggestedName, path, forceDialog);
   if (!target) return null;
-  const json = new TextEncoder().encode(JSON.stringify(annots));
-  const body = new Uint8Array(4 + json.length + original.length);
-  new DataView(body.buffer).setUint32(0, json.length, true);
-  body.set(json, 4);
-  body.set(original, 4 + json.length);
-  const out = await invoke<ArrayBuffer>("save_annotated", body, {
+  const out = await invoke<ArrayBuffer>("save_annotated", framed(changes, original), {
     headers: { path: encodeURIComponent(target) },
   });
   return { path: target, bytes: new Uint8Array(out) };
+}
+
+/** [longitud del JSON (u32 LE)][JSON][binario]: mensajes con datos y PDF a la vez. */
+function framed(data: unknown, bin: Uint8Array): Uint8Array {
+  const json = new TextEncoder().encode(JSON.stringify(data));
+  const body = new Uint8Array(4 + json.length + bin.length);
+  new DataView(body.buffer).setUint32(0, json.length, true);
+  body.set(json, 4);
+  body.set(bin, 4 + json.length);
+  return body;
+}
+
+/**
+ * Anotaciones que ya contiene el PDF (leídas con PDFium) y una copia del PDF sin ellas
+ * para mostrarla (null si no había ninguna).
+ */
+export async function extractAnnotations(pdf: Uint8Array): Promise<{ annots: NativeExisting[]; display: Uint8Array | null }> {
+  const out = new Uint8Array(await invoke<ArrayBuffer>("extract_annotations", pdf));
+  const len = new DataView(out.buffer, out.byteOffset, 4).getUint32(0, true);
+  const annots = JSON.parse(new TextDecoder().decode(out.subarray(4, 4 + len))) as NativeExisting[];
+  const display = out.length > 4 + len ? out.slice(4 + len) : null;
+  return { annots, display };
 }
 
 /** Pregunta Sí/No con el diálogo nativo (o confirm() en el navegador). */

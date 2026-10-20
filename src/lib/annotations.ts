@@ -16,6 +16,8 @@ interface Base {
   date: string;
   /** Autor: el usuario de Windows. */
   author?: string;
+  /** Si ya estaba guardada en el PDF: [página desde 0, índice en la página]. */
+  origin?: [number, number];
 }
 
 export interface MarkupAnnot extends Base {
@@ -131,6 +133,65 @@ export function measureText(text: string, fontSize: number, top: Point): Rect {
   const height = lines.length * fontSize * TEXT_LINE_HEIGHT;
   const [x, y] = top;
   return [x, y - height - 2, x + width + 6, y];
+}
+
+/** Anotación guardada en el PDF tal como la devuelve `extract_annotations` (Rust). */
+export interface NativeExisting {
+  kind: AnnotKind;
+  page: number;
+  index: number;
+  color: [number, number, number];
+  rects: Rect[];
+  point: Point | null;
+  rect: Rect | null;
+  text: string | null;
+  fontSize: number | null;
+  width: number | null;
+  strokes: Point[][];
+  contents: string;
+  author: string;
+  date: string;
+}
+
+const toHex = (c: [number, number, number]) => "#" + c.map((v) => v.toString(16).padStart(2, "0")).join("");
+
+/** Convierte una anotación guardada en una editable, recordando de dónde viene. */
+export function fromNative(e: NativeExisting): Annot {
+  const base = {
+    id: `s${e.page}-${e.index}`,
+    page: e.page + 1,
+    color: toHex(e.color),
+    contents: e.contents,
+    date: e.date,
+    author: e.author,
+    origin: [e.page, e.index] as [number, number],
+  };
+  switch (e.kind) {
+    case "note":
+      return { ...base, kind: "note", point: e.point ?? [0, 0] };
+    case "text":
+      return { ...base, kind: "text", rect: e.rect ?? [0, 0, 0, 0], text: e.text ?? "", fontSize: e.fontSize ?? 12 };
+    case "ink":
+      return { ...base, kind: "ink", strokes: e.strokes, width: e.width ?? 1 };
+    default:
+      return { ...base, kind: e.kind, rects: e.rects, quote: "" };
+  }
+}
+
+/** Contenido que se guarda (sin la cita, que solo es para mostrar). */
+const signature = (a: Annot) => JSON.stringify({ ...a, quote: undefined });
+
+/**
+ * Cambios respecto a lo que hay guardado en el PDF: originales que hay que quitar
+ * (borradas o modificadas) y anotaciones que hay que escribir (nuevas o modificadas).
+ */
+export function diffAnnots(baseline: Annot[], current: Annot[]) {
+  const before = new Map(baseline.map((a) => [a.id, signature(a)]));
+  const now = new Set(current.map((a) => a.id));
+  const changed = current.filter((a) => before.get(a.id) !== signature(a));
+  const changedIds = new Set(changed.map((a) => a.id));
+  const remove = baseline.filter((a) => !now.has(a.id) || changedIds.has(a.id)).map((a) => a.origin!);
+  return { remove, add: changed, changedIds, dirty: remove.length > 0 || changed.length > 0 };
 }
 
 /** Formato que espera el comando `save_annotated` de Rust. */

@@ -70,9 +70,10 @@ export function useAnnotations(initial?: Annot[]) {
     );
   }, []);
 
-  const reset = useCallback(() => {
+  /** Vacía el historial y deja como lista actual `present` (p. ej., lo recién guardado). */
+  const reset = useCallback((present: Annot[] = []) => {
     pending.current = null;
-    setH(EMPTY);
+    setH({ past: [], present, future: [] });
   }, []);
 
   return {

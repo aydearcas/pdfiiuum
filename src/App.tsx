@@ -4,7 +4,7 @@ import TabBar from "./components/TabBar";
 import TopBar from "./components/TopBar";
 import ToolRail from "./components/ToolRail";
 import DocTab, { type DocTabHandle, type TabInit, type TabSnapshot, type TabStatus } from "./components/DocTab";
-import { loadPdf } from "./lib/pdf";
+import { openDocument } from "./lib/document";
 import { DEFAULT_STYLE, type Tool, type ToolStyle } from "./lib/tools";
 import {
   baseName,
@@ -125,9 +125,13 @@ export default function App() {
         return;
       }
       try {
-        const pdf = await loadPdf(file.bytes);
+        // Las anotaciones que ya tiene el PDF pasan a la capa editable.
+        const { pdf, baseline } = await openDocument(file.bytes);
         const id = newTabId();
-        setTabs((all) => [...all, { id, init: { pdf, bytes: file.bytes, name: file.name, path: file.path, ...extra } }]);
+        setTabs((all) => [
+          ...all,
+          { id, init: { pdf, baseline, bytes: file.bytes, name: file.name, path: file.path, ...extra } },
+        ]);
         setActiveId(id);
       } catch (e) {
         notify(`No se pudo abrir «${file.name}»: ${e instanceof Error ? e.message : e}`, true);

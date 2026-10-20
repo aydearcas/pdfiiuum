@@ -4,7 +4,7 @@
 //! de alto nivel no cubre trazos de tinta ni objetos dentro de sellos.
 
 use pdfium_render::prelude::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::ffi::c_void;
 use std::os::raw::{c_int, c_ulong};
 use std::path::Path;
@@ -76,8 +76,10 @@ fn wide(b: &Bindings, s: &str) -> Vec<u8> {
     b.get_pdfium_utf16le_bytes_from_str(s)
 }
 
-/// Aplica las anotaciones a `pdf` y devuelve el PDF resultante.
-pub fn apply_annotations(dll: &Path, pdf: &[u8], annots: &[Annot]) -> Result<Vec<u8>, String> {
+/// Guardado: `remove` son anotaciones originales del PDF ([página, índice], tal como las
+/// devolvió `extract_annotations`) que se han borrado o modificado; `annots`, las que hay
+/// que escribir (nuevas y versiones modificadas). Devuelve el PDF resultante.
+pub fn apply_annotations(dll: &Path, pdf: &[u8], remove: &[[i32; 2]], annots: &[Annot]) -> Result<Vec<u8>, String> {
     let guard = engine(dll)?.lock().map_err(|_| "PDFium está bloqueado".to_string())?;
     let b = &*guard;
     let author = default_author();
@@ -89,7 +91,7 @@ pub fn apply_annotations(dll: &Path, pdf: &[u8], annots: &[Annot]) -> Result<Vec
         }
         let result = (|| {
             let page_count = b.FPDF_GetPageCount(doc);
-            let mut pages: Vec<i32> = annots.iter().map(|a| a.page).collect();
+            let mut pages: Vec<i32> = annots.iter().map(|a| a.page).chain(remove.iter().map(|r| r[0])).collect();
             pages.sort_unstable();
             pages.dedup();
 
@@ -101,6 +103,9 @@ pub fn apply_annotations(dll: &Path, pdf: &[u8], annots: &[Annot]) -> Result<Vec
                 if page.is_null() {
                     return Err(format!("No se pudo cargar la página {}", index + 1));
                 }
+                // Primero se quitan las originales (los índices se refieren al PDF tal cual).
+                let targets: Vec<i32> = remove.iter().filter(|r| r[0] == index).map(|r| r[1]).collect();
+                remove_with_popups(b, page, &targets);
                 for a in annots.iter().filter(|a| a.page == index) {
                     if let Err(e) = add_annotation(b, doc, page, a, &author) {
                         b.FPDF_ClosePage(page);
@@ -115,6 +120,228 @@ pub fn apply_annotations(dll: &Path, pdf: &[u8], annots: &[Annot]) -> Result<Vec
         b.FPDF_CloseDocument(doc);
         result
     }
+}
+
+/// Quita de la página las anotaciones de esos índices y sus ventanas emergentes (/Popup).
+unsafe fn remove_with_popups(b: &Bindings, page: FPDF_PAGE, indices: &[i32]) {
+    if indices.is_empty() {
+        return;
+    }
+    let count = b.FPDFPage_GetAnnotCount(page);
+    let mut all: Vec<i32> = Vec::new();
+    for &i in indices.iter().filter(|&&i| i >= 0 && i < count) {
+        all.push(i);
+        let annot = b.FPDFPage_GetAnnot(page, i);
+        if annot.is_null() {
+            continue;
+        }
+        let popup = b.FPDFAnnot_GetLinkedAnnot(annot, "Popup");
+        if !popup.is_null() {
+            let pi = b.FPDFPage_GetAnnotIndex(page, popup);
+            if pi >= 0 {
+                all.push(pi);
+            }
+            b.FPDFPage_CloseAnnot(popup);
+        }
+        b.FPDFPage_CloseAnnot(annot);
+    }
+    // De mayor a menor para que los índices pendientes sigan siendo válidos.
+    all.sort_unstable_by(|a, b| b.cmp(a));
+    all.dedup();
+    for i in all {
+        b.FPDFPage_RemoveAnnot(page, i);
+    }
+}
+
+/// Anotación ya guardada en el PDF que la app puede editar.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Existing {
+    pub kind: &'static str,
+    /// Página (desde 0) e índice dentro de la página: identifican la original al guardar.
+    pub page: i32,
+    pub index: i32,
+    pub color: [u8; 3],
+    pub rects: Vec<[f32; 4]>,
+    pub point: Option<[f32; 2]>,
+    pub rect: Option<[f32; 4]>,
+    pub text: Option<String>,
+    pub font_size: Option<f32>,
+    pub width: Option<f32>,
+    pub strokes: Vec<Vec<[f32; 2]>>,
+    pub contents: String,
+    pub author: String,
+    pub date: String,
+}
+
+pub struct Extracted {
+    pub annots: Vec<Existing>,
+    /// Copia del PDF sin esas anotaciones (la app las dibuja en su capa editable);
+    /// None si no había ninguna.
+    pub display: Option<Vec<u8>>,
+}
+
+const ANNOT_FLAG_HIDDEN: c_int = 2;
+
+/// Lee las notas, marcas, dibujos y textos de la app que ya contiene el PDF.
+pub fn extract_annotations(dll: &Path, pdf: &[u8]) -> Result<Extracted, String> {
+    let guard = engine(dll)?.lock().map_err(|_| "PDFium está bloqueado".to_string())?;
+    let b = &*guard;
+    unsafe {
+        let doc = b.FPDF_LoadMemDocument64(pdf, None);
+        if doc.is_null() {
+            return Err(format!("PDFium no pudo abrir el documento (error {})", b.FPDF_GetLastError()));
+        }
+        let result = (|| {
+            let mut annots = Vec::new();
+            for p in 0..b.FPDF_GetPageCount(doc) {
+                let page = b.FPDF_LoadPage(doc, p);
+                if page.is_null() {
+                    continue;
+                }
+                let mut found = Vec::new();
+                for i in 0..b.FPDFPage_GetAnnotCount(page) {
+                    let annot = b.FPDFPage_GetAnnot(page, i);
+                    if annot.is_null() {
+                        continue;
+                    }
+                    if let Some(e) = read_existing(b, annot, p, i) {
+                        found.push(i);
+                        annots.push(e);
+                    }
+                    b.FPDFPage_CloseAnnot(annot);
+                }
+                remove_with_popups(b, page, &found);
+                b.FPDF_ClosePage(page);
+            }
+            let display = if annots.is_empty() { None } else { Some(save(b, doc)?) };
+            Ok(Extracted { annots, display })
+        })();
+        b.FPDF_CloseDocument(doc);
+        result
+    }
+}
+
+unsafe fn read_existing(b: &Bindings, annot: FPDF_ANNOTATION, page: i32, index: i32) -> Option<Existing> {
+    if b.FPDFAnnot_GetFlags(annot) & ANNOT_FLAG_HIDDEN != 0 {
+        return None;
+    }
+    // Las respuestas a otro comentario (/IRT) se dejan como están.
+    let irt = b.FPDFAnnot_GetLinkedAnnot(annot, "IRT");
+    if !irt.is_null() {
+        b.FPDFPage_CloseAnnot(irt);
+        return None;
+    }
+    let subtype = b.FPDFAnnot_GetSubtype(annot) as c_int;
+    let nm = read_str(b, annot, "NM");
+    let kind = match subtype {
+        ANNOT_HIGHLIGHT => "highlight",
+        ANNOT_UNDERLINE => "underline",
+        ANNOT_STRIKEOUT => "strikeout",
+        ANNOT_TEXT => "note",
+        ANNOT_INK => "ink",
+        ANNOT_STAMP if nm.starts_with(TEXT_STAMP_PREFIX) => "text",
+        _ => return None,
+    };
+    let mut rc = FS_RECTF { left: 0.0, top: 0.0, right: 0.0, bottom: 0.0 };
+    b.FPDFAnnot_GetRect(annot, &mut rc);
+    let rect = [rc.left.min(rc.right), rc.bottom.min(rc.top), rc.left.max(rc.right), rc.bottom.max(rc.top)];
+
+    let (mut r, mut g, mut bl, mut a) = (0u32, 0u32, 0u32, 0u32);
+    let has_color = b.FPDFAnnot_GetColor(annot, COLORTYPE_COLOR as FPDFANNOT_COLORTYPE, &mut r, &mut g, &mut bl, &mut a) != 0;
+    let default: [u8; 3] = match kind {
+        "highlight" | "note" => [255, 212, 0],
+        "underline" => [19, 163, 90],
+        "text" => [17, 17, 17],
+        _ => [226, 35, 26],
+    };
+    let color = if has_color { [r as u8, g as u8, bl as u8] } else { default };
+
+    let mut e = Existing {
+        kind,
+        page,
+        index,
+        color,
+        rects: Vec::new(),
+        point: None,
+        rect: None,
+        text: None,
+        font_size: None,
+        width: None,
+        strokes: Vec::new(),
+        contents: read_str(b, annot, "Contents"),
+        author: read_str(b, annot, "T"),
+        date: {
+            let m = read_str(b, annot, "M");
+            if m.is_empty() { read_str(b, annot, "CreationDate") } else { m }
+        },
+    };
+    match kind {
+        "highlight" | "underline" | "strikeout" => {
+            let n = b.FPDFAnnot_CountAttachmentPoints(annot);
+            for q in 0..n {
+                let mut quad = FS_QUADPOINTSF { x1: 0.0, y1: 0.0, x2: 0.0, y2: 0.0, x3: 0.0, y3: 0.0, x4: 0.0, y4: 0.0 };
+                if b.FPDFAnnot_GetAttachmentPoints(annot, q, &mut quad) != 0 {
+                    let xs = [quad.x1, quad.x2, quad.x3, quad.x4];
+                    let ys = [quad.y1, quad.y2, quad.y3, quad.y4];
+                    let min = |v: [f32; 4]| v.iter().cloned().fold(f32::MAX, f32::min);
+                    let max = |v: [f32; 4]| v.iter().cloned().fold(f32::MIN, f32::max);
+                    e.rects.push([min(xs), min(ys), max(xs), max(ys)]);
+                }
+            }
+            if e.rects.is_empty() {
+                e.rects.push(rect);
+            }
+        }
+        "note" => e.point = Some([rect[0], rect[3]]),
+        "ink" => {
+            for s in 0..b.FPDFAnnot_GetInkListCount(annot) {
+                let len = b.FPDFAnnot_GetInkListPath(annot, s, std::ptr::null_mut(), 0);
+                if len == 0 {
+                    continue;
+                }
+                let mut pts = vec![FS_POINTF { x: 0.0, y: 0.0 }; len as usize];
+                b.FPDFAnnot_GetInkListPath(annot, s, pts.as_mut_ptr(), len);
+                e.strokes.push(pts.iter().map(|p| [p.x, p.y]).collect());
+            }
+            let (mut h, mut v, mut w) = (0.0f32, 0.0f32, 0.0f32);
+            e.width = Some(if b.FPDFAnnot_GetBorder(annot, &mut h, &mut v, &mut w) != 0 && w > 0.0 { w } else { 1.0 });
+            if e.strokes.is_empty() {
+                return None;
+            }
+        }
+        "text" => {
+            // NM = "pdfiiuum-text;size=14;color=17,17,17"
+            for part in nm.split(';') {
+                if let Some(s) = part.strip_prefix("size=") {
+                    e.font_size = s.parse().ok();
+                } else if let Some(c) = part.strip_prefix("color=") {
+                    let v: Vec<u8> = c.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+                    if v.len() == 3 {
+                        e.color = [v[0], v[1], v[2]];
+                    }
+                }
+            }
+            e.rect = Some(rect);
+            e.text = Some(std::mem::take(&mut e.contents));
+        }
+        _ => {}
+    }
+    Some(e)
+}
+
+/// Lee un valor de texto (/Contents, /T, /M…) de la anotación.
+unsafe fn read_str(b: &Bindings, annot: FPDF_ANNOTATION, key: &str) -> String {
+    let bytes = b.FPDFAnnot_GetStringValue(annot, key, std::ptr::null_mut(), 0);
+    if bytes <= 2 {
+        return String::new();
+    }
+    let mut buf = vec![0u16; (bytes as usize) / 2];
+    b.FPDFAnnot_GetStringValue(annot, key, buf.as_mut_ptr() as *mut FPDF_WCHAR, bytes);
+    while buf.last() == Some(&0) {
+        buf.pop();
+    }
+    String::from_utf16_lossy(&buf)
 }
 
 unsafe fn add_annotation(
@@ -300,8 +527,25 @@ mod tests {
         ]"#;
         let annots: Vec<Annot> = serde_json::from_str(json).unwrap();
         let pdf = std::fs::read(input).unwrap();
-        let out = apply_annotations(&dll, &pdf, &annots).unwrap();
-        std::fs::write(output, out).unwrap();
+        let out = apply_annotations(&dll, &pdf, &[], &annots).unwrap();
+        std::fs::write(&output, &out).unwrap();
+
+        // Las seis se vuelven a leer como editables y la copia de pantalla queda sin ellas.
+        let ex = extract_annotations(&dll, &out).unwrap();
+        let kinds: Vec<&str> = ex.annots.iter().map(|a| a.kind).collect();
+        assert_eq!(kinds, ["highlight", "underline", "strikeout", "note", "text", "ink"]);
+        assert_eq!(ex.annots[0].contents, "Comentario en resaltado");
+        assert_eq!(ex.annots[4].text.as_deref(), Some("Texto insertado\nSegunda línea"));
+        assert_eq!(ex.annots[4].font_size, Some(14.0));
+        let display = ex.display.expect("copia sin anotaciones");
+        assert!(extract_annotations(&dll, &display).unwrap().annots.is_empty());
+
+        // Borrar el resaltado (página 0, índice 0) y guardar: quedan las otras cinco.
+        let first = &ex.annots[0];
+        let saved = apply_annotations(&dll, &out, &[[first.page, first.index]], &[]).unwrap();
+        let again = extract_annotations(&dll, &saved).unwrap();
+        assert_eq!(again.annots.len(), 5);
+        assert!(again.annots.iter().all(|a| a.kind != "highlight"));
     }
 }
 
