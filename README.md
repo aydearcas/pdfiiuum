@@ -1,6 +1,38 @@
-# pdfiiuum
+<p align="center">
+  <img src="public/icon.png" width="96" alt="Icono de pdfiiuum: un coche de Fórmula 1 en líneas blancas sobre un cuadrado rojo">
+</p>
 
-Lector de PDF de escritorio para Windows, ligero y con interfaz oscura. Permite abrir varios PDF en pestañas, resaltar, subrayar, tachar, comentar, insertar texto y dibujar, y guarda las anotaciones dentro del propio PDF como anotaciones estándar, legibles en Acrobat, Edge o Chrome.
+<h1 align="center">pdfiiuum</h1>
+
+<p align="center">
+  Lee, resalta y comenta tus PDF en pestañas, y guarda las anotaciones dentro del propio PDF.<br>
+  <sub>A fast and simple PDF reader for Windows with tabs, highlights and comments.</sub>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="Licencia: GPL v3" src="https://img.shields.io/badge/licencia-GPL%20v3-blue"></a>
+  <img alt="Windows 10/11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4">
+  <img alt="Tauri 2" src="https://img.shields.io/badge/Tauri-2-24C8DB">
+  <a href="https://github.com/aydearcas/pdfiiuum/releases/latest"><img alt="Última versión" src="https://img.shields.io/github/v/release/aydearcas/pdfiiuum?label=versi%C3%B3n"></a>
+</p>
+
+<p align="center">
+  <img src="docs/manual-portada.png" width="300" alt="Portada del manual de instrucciones de pdfiiuum">
+  &nbsp;
+  <img src="docs/manual-interfaz.png" width="300" alt="Página del manual con el esquema numerado de la interfaz">
+  <br><sub>Al estilo de los manuales de instrucciones de los 80–90.</sub>
+</p>
+
+---
+
+pdfiiuum es un lector de PDF de escritorio para Windows, ligero y con interfaz oscura. Abre varios PDF en pestañas; permite resaltar, subrayar, tachar, comentar, insertar texto y dibujar; y guarda las anotaciones dentro del propio PDF como anotaciones estándar, legibles en Acrobat, Edge o Chrome.
+
+## Descarga
+
+1. Descarga `pdfiiuum_<versión>_x64-setup.exe` desde [**Releases**](https://github.com/aydearcas/pdfiiuum/releases/latest).
+2. Ábrelo y elige la carpeta de instalación (por defecto `C:\Program Files\pdfiiuum`). Pide permiso de administrador una sola vez.
+3. La primera vez Windows puede mostrar «Windows protegió su PC», porque el instalador no está firmado: pulsa **Más información → Ejecutar de todas formas**.
+4. Para abrir los PDF con doble clic: clic derecho en un PDF → **Abrir con → Elegir otra aplicación → pdfiiuum → Siempre**.
 
 ## Funciones
 
@@ -31,8 +63,10 @@ Cierra y vuelve a abrir la terminal después de instalar Rust. También hace fal
 | `npm install` | Instala dependencias |
 | `npm run dev` | Solo la interfaz, en el navegador (http://localhost:1420). Sin guardado de anotaciones |
 | `npm run tauri dev` | App de escritorio en modo desarrollo |
-| `npm run tauri build` | Genera el instalador en `src-tauri/target/release/bundle/nsis/` |
+| `npm run release` | Genera el instalador en `src-tauri/target/release/bundle/nsis/` sin rutas del equipo dentro del ejecutable (úsalo para publicar) |
+| `npm run tauri build` | Igual, pero el ejecutable conserva las rutas locales de compilación |
 | `npx tauri icon ruta/al/icono.png` | Regenera todos los iconos (PNG de 1024×1024) |
+| `powershell -File scripts\render-docs.ps1` | Regenera las imágenes del manual (`docs/*.png`) desde `docs/manual/*.html` con Edge |
 
 ## Estructura
 

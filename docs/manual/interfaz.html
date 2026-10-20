@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>pdfiiuum · esquema de la interfaz</title>
+<style>
+  :root {
+    --paper: #f2ece0;
+    --ink: #1c1c1c;
+    --muted: #6d675d;
+    --green: #009246;
+    --white: #fbfaf6;
+    --red: #ce2b37;
+    /* colores de la app */
+    --a-bg: #1b1c1f;
+    --a-stage: #141517;
+    --a-panel: #232428;
+    --a-panel2: #2b2d32;
+    --a-border: #33353b;
+    --a-text: #f3f3f4;
+    --a-muted: #9b9da5;
+    --a-accent: #e2231a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    width: 630px; height: 893px; position: relative; overflow: hidden;
+    background: var(--paper); color: var(--ink);
+    font-family: "Segoe UI", Arial, sans-serif;
+  }
+  .top { position: absolute; left: 0; right: 0; top: 0; }
+  .top div { height: 3px; }
+  .runhead {
+    position: absolute; left: 63px; right: 63px; top: 18px; padding-bottom: 6px;
+    display: flex; justify-content: space-between; border-bottom: 1px solid #cfc7b6;
+    font-size: 10px; color: var(--muted);
+  }
+  .runhead b { color: var(--ink); }
+  h2 {
+    position: absolute; left: 63px; top: 84px; margin: 0;
+    font-family: "Arial Black", sans-serif; font-size: 15px; letter-spacing: -0.2px;
+  }
+  h2 span { font-family: "Segoe UI", sans-serif; font-weight: 700; }
+
+  /* ---------- Ventana de la app ---------- */
+  .win {
+    position: absolute; left: 63px; top: 118px; width: 504px; height: 336px;
+    background: var(--a-stage); border-radius: 8px; overflow: hidden;
+    box-shadow: 0 10px 26px rgba(0,0,0,.28); color: var(--a-text); font-size: 8px;
+  }
+  .title { height: 20px; background: #202124; display: flex; align-items: center; padding: 0 10px; color: #d6d7db; font-size: 8.5px; }
+  .title i { margin-left: auto; font-style: normal; letter-spacing: 9px; color: #9b9da5; }
+  .tabs { height: 22px; background: var(--a-stage); display: flex; align-items: flex-end; gap: 2px; padding: 0 6px; }
+  .tab { width: 104px; height: 18px; border-radius: 6px 6px 0 0; display: flex; align-items: center; gap: 5px; padding: 0 7px; color: var(--a-muted); position: relative; }
+  .tab.on { background: var(--a-panel); color: var(--a-text); }
+  .tab.on::before { content: ""; position: absolute; left: 7px; right: 7px; top: 0; height: 1.5px; background: var(--a-accent); border-radius: 0 0 2px 2px; }
+  .tab .x { margin-left: auto; color: var(--a-muted); }
+  .tab .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--a-accent); margin-left: auto; }
+  .plus { color: var(--a-muted); font-size: 11px; margin: 0 0 3px 4px; }
+  .bar { height: 26px; background: var(--a-panel); border-bottom: 1px solid var(--a-border); display: flex; align-items: center; padding: 0 8px; gap: 7px; }
+  .ic { width: 11px; height: 9px; border: 1.3px solid #d8d9dd; border-radius: 2px; }
+  .ic.round { border-radius: 50%; width: 10px; height: 10px; }
+  .sep { width: 1px; height: 12px; background: var(--a-border); }
+  .pill { padding: 2px 6px; border: 1px solid var(--a-border); border-radius: 4px; background: var(--a-bg); color: var(--a-text); }
+  .grow { flex: 1; }
+  .body { position: absolute; left: 0; right: 0; top: 68px; bottom: 0; display: flex; }
+  .rail { width: 24px; background: var(--a-panel); border-right: 1px solid var(--a-border); display: flex; flex-direction: column; align-items: center; gap: 7px; padding-top: 7px; }
+  .rail .t { width: 13px; height: 13px; border-radius: 4px; display: grid; place-items: center; }
+  .rail .t.on { background: var(--a-accent); }
+  .rail .t::after { content: ""; width: 7px; height: 7px; border: 1.2px solid #d8d9dd; border-radius: 2px; }
+  .rail .t.on::after { border-color: #fff; }
+  .rail .ln { width: 12px; height: 1px; background: var(--a-border); }
+  .rail .clr { width: 10px; height: 10px; border-radius: 50%; background: #ffd400; border: 1.5px solid #fff; }
+  .thumbs { width: 62px; background: var(--a-bg); border-right: 1px solid var(--a-border); display: flex; flex-direction: column; align-items: center; gap: 9px; padding-top: 9px; }
+  .th {
+    width: 36px; height: 48px;
+    background: repeating-linear-gradient(#fff 0 3px, #c8c8c8 3px 4px, #fff 4px 5px) 5px 9px / 26px 32px no-repeat, #fff;
+  }
+  .th.on { outline: 1.5px solid var(--a-accent); outline-offset: 2px; }
+  .stage { flex: 1; position: relative; background: var(--a-stage); }
+  .page { position: absolute; left: 20px; top: 10px; width: 196px; height: 270px; background: #fff; padding: 18px 16px; }
+  .page h3 { margin: 0 0 10px; color: #1c1c1c; font-size: 10px; }
+  .ln2 { height: 3px; background: #a3a3a3; border-radius: 1px; margin-bottom: 5px; position: relative; }
+  .hl { position: absolute; left: -2px; top: -2px; height: 7px; mix-blend-mode: multiply; opacity: .6; }
+  .sel { position: absolute; left: -2px; top: -2px; height: 7px; background: rgba(64,140,255,.35); }
+  .note { position: absolute; right: 12px; top: 14px; width: 11px; height: 11px; background: #ffd400; border: 1px solid #8a7300; border-radius: 2px; }
+  .menu { position: absolute; left: 70px; top: 140px; width: 118px; padding: 5px; background: var(--a-panel2); border: 1px solid var(--a-border); border-radius: 7px; box-shadow: 0 6px 16px rgba(0,0,0,.5); }
+  .menu .icons { display: flex; gap: 8px; padding: 2px 3px 5px; }
+  .menu .icons span { width: 9px; height: 9px; border: 1.2px solid #d8d9dd; border-radius: 2px; }
+  .menu .sw { display: flex; gap: 3.5px; padding: 0 3px 5px; }
+  .menu .sw span { width: 9px; height: 9px; border-radius: 50%; }
+  .menu .it { border-top: 1px solid var(--a-border); padding: 4px 3px 1px; color: var(--a-text); }
+  .panel { width: 128px; background: var(--a-bg); border-left: 1px solid var(--a-border); padding: 0 7px; }
+  .panel .ph { height: 22px; display: flex; align-items: center; gap: 5px; font-weight: 700; border-bottom: 1px solid var(--a-border); margin: 0 -7px 6px; padding: 0 8px; }
+  .panel .n { padding: 0 4px; border-radius: 6px; background: var(--a-panel2); color: var(--a-muted); font-size: 7px; }
+  .panel .pg { color: var(--a-muted); font-size: 6.5px; font-weight: 700; margin: 4px 1px; letter-spacing: .04em; }
+  .card { background: var(--a-panel); border: 1px solid var(--a-border); border-left: 2.5px solid; border-radius: 5px; padding: 5px 6px; margin-bottom: 5px; }
+  .card b { display: block; font-size: 7px; margin-bottom: 3px; }
+  .card q { display: block; color: var(--a-muted); font-style: italic; font-size: 6.5px; quotes: none; margin-bottom: 2px; }
+  .card span { font-size: 7px; }
+
+  /* ---------- Números ---------- */
+  .num {
+    position: absolute; width: 17px; height: 17px; border-radius: 50%;
+    background: var(--ink); color: #fff; border: 1.5px solid #fff;
+    display: grid; place-items: center; font-size: 9px; font-weight: 800;
+    box-shadow: 0 1px 3px rgba(0,0,0,.35); z-index: 5;
+  }
+  .legend {
+    position: absolute; left: 63px; right: 63px; top: 478px;
+    display: grid; grid-template-columns: 1fr 1fr; column-gap: 26px; row-gap: 7px;
+    font-size: 10.5px; line-height: 1.35;
+  }
+  .legend div { display: flex; gap: 10px; }
+  .legend b { width: 14px; flex: none; font-family: "Arial Black", sans-serif; font-size: 11px; }
+  .tips {
+    position: absolute; left: 63px; right: 63px; top: 668px;
+    border-top: 1px solid #cfc7b6; padding-top: 12px; font-size: 10px; color: var(--ink);
+  }
+  .tips h4 { margin: 0 0 7px; font-family: "Arial Black", sans-serif; font-size: 11px; }
+  .tips table { border-collapse: collapse; width: 100%; }
+  .tips td { padding: 2.5px 0; vertical-align: top; }
+  .tips td:first-child { width: 178px; font-weight: 700; white-space: nowrap; }
+  kbd { font-family: Consolas, monospace; font-size: 9px; background: #e4dccb; border-radius: 3px; padding: 0 4px; }
+  .foot {
+    position: absolute; left: 63px; right: 63px; bottom: 26px; padding-top: 8px;
+    border-top: 1px solid #cfc7b6; display: flex; align-items: center; font-size: 10px; color: var(--muted);
+  }
+  .foot .es { margin-left: auto; background: var(--ink); color: #fff; font-weight: 800; padding: 1px 6px; font-size: 10px; }
+  .foot .p { margin-left: 10px; font-family: "Arial Black", sans-serif; color: var(--ink); font-size: 13px; }
+</style>
+</head>
+<body>
+  <div class="top"><div style="background:var(--green)"></div><div style="background:var(--white)"></div><div style="background:var(--red)"></div></div>
+  <div class="runhead"><span><b>pdfiiuum</b> · PD-F1</span><span>MANUAL DE INSTRUCCIONES</span></div>
+
+  <h2>LA INTERFAZ <span>— pestañas, anotaciones y comentarios</span></h2>
+
+  <div class="win">
+    <div class="title">pdfiiuum<i>— ▫ ×</i></div>
+    <div class="tabs">
+      <div class="tab on">▤ informe.pdf<span class="x">×</span></div>
+      <div class="tab">▤ contrato.pdf<span class="dot"></span></div>
+      <span class="plus">+</span>
+    </div>
+    <div class="bar">
+      <span class="ic"></span><span class="sep"></span><span class="ic"></span><span class="ic"></span><span class="ic"></span>
+      <span class="sep"></span><span class="ic round"></span><span class="ic round"></span>
+      <span class="grow"></span>
+      <span class="pill">3</span><span style="color:var(--a-muted)">/ 12</span><span class="sep"></span>
+      <span class="ic round"></span><span class="pill">100 %</span><span class="ic round"></span>
+      <span class="grow"></span>
+      <span class="ic round"></span>
+    </div>
+    <div class="body">
+      <div class="rail">
+        <span class="t on"></span><span class="t"></span><span class="ln"></span>
+        <span class="t"></span><span class="t"></span><span class="t"></span><span class="t"></span><span class="t"></span><span class="t"></span>
+        <span class="ln"></span><span class="clr"></span>
+      </div>
+      <div class="thumbs"><div class="th"></div><div class="th"></div><div class="th on"></div><div class="th"></div></div>
+      <div class="stage">
+        <div class="page">
+          <h3>Informe anual 2026</h3>
+          <div class="ln2" style="width:100%"></div>
+          <div class="ln2" style="width:92%"><span class="hl" style="width:104%;background:#ffd400"></span></div>
+          <div class="ln2" style="width:100%"><span class="hl" style="width:60%;background:#ffd400"></span></div>
+          <div class="ln2" style="width:85%"></div>
+          <div class="ln2" style="width:100%"></div>
+          <div class="ln2" style="width:96%"><span class="hl" style="width:70%;background:#7ce35b"></span></div>
+          <div class="ln2" style="width:78%"></div>
+          <div class="ln2" style="width:100%"><span class="sel" style="width:88%"></span></div>
+          <div class="ln2" style="width:94%"><span class="sel" style="width:40%"></span></div>
+          <div class="ln2" style="width:100%"></div>
+          <div class="ln2" style="width:90%"></div>
+          <div class="ln2" style="width:100%"></div>
+          <div class="ln2" style="width:72%"></div>
+          <div class="ln2" style="width:100%"></div>
+          <div class="ln2" style="width:88%"></div>
+          <div class="ln2" style="width:100%"></div>
+          <div class="ln2" style="width:64%"></div>
+          <span class="note"></span>
+        </div>
+        <div class="menu">
+          <div class="icons"><span></span><span></span><span></span><span></span></div>
+          <div class="sw">
+            <span style="background:#ffd400"></span><span style="background:#ff9f1a"></span><span style="background:#7ce35b"></span><span style="background:#3fd6c9"></span>
+            <span style="background:#3fa9f5"></span><span style="background:#b388ff"></span><span style="background:#ff6fb5"></span><span style="background:#ff5252"></span>
+          </div>
+          <div class="it">⧉ Copiar texto</div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="ph">▣ Comentarios <span class="n">3</span></div>
+        <div class="pg">PÁGINA 3</div>
+        <div class="card" style="border-left-color:#ffd400"><b>aydearcas</b><span>Revisar esta cifra con contabilidad</span></div>
+        <div class="card" style="border-left-color:#ffd400"><b>aydearcas</b><q>Los ingresos crecieron un 12 %…</q><span>¿Fuente?</span></div>
+        <div class="card" style="border-left-color:#7ce35b"><b>aydearcas</b><q>…respecto al ejercicio anterior</q></div>
+      </div>
+    </div>
+
+    <span class="num" style="left:198px; top:22px">1</span>
+    <span class="num" style="left:90px; top:47px">2</span>
+    <span class="num" style="left:226px; top:47px">3</span>
+    <span class="num" style="left:452px; top:47px">4</span>
+    <span class="num" style="left:20px; top:132px">5</span>
+    <span class="num" style="left:28px; top:247px">6</span>
+    <span class="num" style="left:66px; top:96px">7</span>
+    <span class="num" style="left:286px; top:216px">8</span>
+    <span class="num" style="left:298px; top:84px">9</span>
+    <span class="num" style="left:458px; top:96px">10</span>
+  </div>
+
+  <div class="legend">
+    <div><b>1</b>Pestañas: arrastra para reordenar, sácala fuera o suéltala en otra ventana</div>
+    <div><b>6</b>Color y estilo de la herramienta activa</div>
+    <div><b>2</b>Abrir, guardar, guardar como, deshacer y rehacer</div>
+    <div><b>7</b>Miniaturas de las páginas</div>
+    <div><b>3</b>Página actual y zoom</div>
+    <div><b>8</b>Menú al seleccionar texto: comentar, resaltar en 8 colores, subrayar, tachar y copiar</div>
+    <div><b>4</b>Buscar en el documento</div>
+    <div><b>9</b>Resaltado con comentario y nota</div>
+    <div><b>5</b>Herramientas: seleccionar, mano, comentario, resaltar, subrayar, tachar, texto y dibujo</div>
+    <div><b>10</b>Panel de comentarios en orden de lectura (se pliega)</div>
+  </div>
+
+  <div class="tips">
+    <h4>ATAJOS DE TECLADO</h4>
+    <table>
+      <tr><td><kbd>Ctrl</kbd> <kbd>O</kbd> · <kbd>Ctrl</kbd> <kbd>S</kbd></td><td>Abrir en pestaña nueva · Guardar las anotaciones en el PDF</td></tr>
+      <tr><td><kbd>Ctrl</kbd> <kbd>Tab</kbd> · <kbd>Ctrl</kbd> <kbd>W</kbd></td><td>Pestaña siguiente · Cerrar pestaña</td></tr>
+      <tr><td><kbd>Ctrl</kbd> <kbd>Z</kbd> · <kbd>Ctrl</kbd> <kbd>Y</kbd></td><td>Deshacer · Rehacer</td></tr>
+      <tr><td><kbd>V</kbd> <kbd>H</kbd> <kbd>N</kbd> <kbd>R</kbd> <kbd>U</kbd> <kbd>K</kbd> <kbd>T</kbd> <kbd>D</kbd></td><td>Seleccionar, mano, comentario, resaltar, subrayar, tachar, texto, dibujo</td></tr>
+      <tr><td><kbd>Ctrl</kbd> <kbd>F</kbd> · <kbd>Ctrl</kbd> + rueda</td><td>Buscar · Zoom</td></tr>
+    </table>
+  </div>
+
+  <div class="foot"><span>Versión 0.1.0</span><span class="es">ES</span><span class="p">3</span></div>
+</body>
+</html>

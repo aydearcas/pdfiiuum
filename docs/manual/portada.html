@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>pdfiiuum · portada del manual</title>
+<style>
+  :root {
+    --paper: #f2ece0;
+    --ink: #1c1c1c;
+    --muted: #6d675d;
+    --green: #009246;
+    --white: #fbfaf6;
+    --red: #ce2b37;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    width: 630px;
+    height: 893px;
+    position: relative;
+    overflow: hidden;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Segoe UI", Arial, sans-serif;
+  }
+  .head { position: absolute; left: 63px; top: 38px; }
+  .head b { display: block; font-size: 12.5px; letter-spacing: 0.02em; }
+  .head span { display: block; margin-top: 3px; font-size: 9.5px; color: var(--muted); letter-spacing: 0.03em; }
+  .lang {
+    position: absolute; right: 63px; top: 40px;
+    padding: 2px 8px; background: var(--ink); color: #fff;
+    font-weight: 800; font-size: 11px;
+  }
+  /* Franjas diagonales: la tricolor italiana con un remate de cuadros de meta. */
+  .stripes {
+    position: absolute; left: -10px; top: 240px; width: 700px;
+    transform: rotate(-10deg); transform-origin: left top;
+  }
+  .stripes div { height: 15px; }
+  .stripes .g { background: var(--green); }
+  .stripes .w { background: var(--white); box-shadow: inset 0 1px 0 rgba(0,0,0,.06), inset 0 -1px 0 rgba(0,0,0,.06); }
+  .stripes .r { background: var(--red); }
+  .stripes .chk {
+    height: 14px;
+    background:
+      repeating-conic-gradient(var(--ink) 0 25%, var(--white) 0 50%) 0 0 / 14px 14px;
+  }
+  .logo { position: absolute; left: 63px; top: 330px; display: flex; align-items: center; gap: 16px; }
+  .logo img { width: 92px; height: 92px; filter: drop-shadow(0 6px 10px rgba(0,0,0,.18)); }
+  .logo h1 {
+    margin: 0; font-family: "Arial Black", "Segoe UI Black", sans-serif;
+    font-size: 64px; letter-spacing: -2px; line-height: 1;
+  }
+  .sub { position: absolute; left: 63px; top: 436px; }
+  .sub b { display: block; font-size: 12.5px; letter-spacing: 0.02em; }
+  .sub span { display: block; margin-top: 5px; font-size: 11px; color: var(--muted); }
+  .sub i { font-style: normal; margin: 0 7px; }
+  .tv { position: absolute; left: 159px; top: 505px; }
+  .chips { position: absolute; left: 63px; right: 63px; top: 772px; display: flex; justify-content: space-between; }
+  .chips div {
+    width: 112px; padding: 5px 0; border: 1.6px solid var(--ink); border-radius: 4px;
+    text-align: center; font-weight: 800; font-size: 9.5px; letter-spacing: 0.02em;
+  }
+  .note {
+    position: absolute; left: 0; right: 0; top: 816px;
+    text-align: center; font-style: italic; font-size: 10.5px; color: var(--muted); line-height: 1.55;
+  }
+  .foot { position: absolute; left: 0; right: 0; bottom: 0; }
+  .foot div { height: 4px; }
+</style>
+</head>
+<body>
+  <div class="head">
+    <b>MANUAL DE INSTRUCCIONES</b>
+    <span>OPERATING INSTRUCTIONS · MODE D'EMPLOI · ISTRUZIONI PER L'USO</span>
+  </div>
+  <div class="lang">ES</div>
+
+  <div class="stripes">
+    <div class="g"></div><div class="w"></div><div class="r"></div><div class="chk"></div>
+  </div>
+
+  <div class="logo">
+    <img src="../../src-tauri/icons/source/icon-1024.png" alt="">
+    <h1>pdfiiuum</h1>
+  </div>
+  <div class="sub">
+    <b>LECTOR DE DOCUMENTOS PDF &nbsp;·&nbsp; ANOTACIONES Y PESTAÑAS</b>
+    <span>Modelo PD-F1<i>·</i>Versión 0.1.0<i>·</i>Para Windows 10 / 11</span>
+  </div>
+
+  <!-- Monitor de tubo con pdfiiuum en pantalla -->
+  <svg class="tv" width="312" height="248" viewBox="0 0 340 270" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <clipPath id="scr"><rect x="32" y="22" width="276" height="160" rx="6"/></clipPath>
+    </defs>
+    <!-- pie -->
+    <path d="M128 222 L212 222 L236 252 L104 252 Z" fill="#3a3732"/>
+    <rect x="84" y="250" width="172" height="11" rx="2" fill="#2d2a26"/>
+    <!-- carcasa -->
+    <rect x="4" y="4" width="332" height="222" rx="16" fill="#dcd4c3" stroke="#1c1c1c" stroke-width="3"/>
+    <rect x="20" y="14" width="300" height="178" rx="10" fill="#26272b"/>
+    <!-- pantalla: la interfaz de pdfiiuum -->
+    <g clip-path="url(#scr)">
+      <rect x="32" y="22" width="276" height="160" fill="#141517"/>
+      <!-- pestañas -->
+      <rect x="40" y="27" width="62" height="11" rx="3" fill="#232428"/>
+      <rect x="44" y="27" width="40" height="1.6" fill="#e2231a"/>
+      <rect x="47" y="31" width="38" height="3" rx="1" fill="#f3f3f4"/>
+      <rect x="104" y="27" width="56" height="11" rx="3" fill="#1b1c1f"/>
+      <rect x="110" y="31" width="34" height="3" rx="1" fill="#6f7178"/>
+      <!-- barra superior -->
+      <rect x="32" y="38" width="276" height="12" fill="#232428"/>
+      <g fill="#c9cbd1"><rect x="40" y="42" width="6" height="4" rx="1"/><rect x="50" y="42" width="6" height="4" rx="1"/><rect x="60" y="42" width="6" height="4" rx="1"/><rect x="150" y="42" width="24" height="4" rx="1"/><rect x="296" y="42" width="6" height="4" rx="1"/></g>
+      <!-- barra de herramientas -->
+      <rect x="32" y="50" width="12" height="132" fill="#232428"/>
+      <rect x="35" y="54" width="6" height="6" rx="1.5" fill="#e2231a"/>
+      <g fill="#c9cbd1"><rect x="36" y="65" width="4" height="4" rx="1"/><rect x="36" y="74" width="4" height="4" rx="1"/><rect x="36" y="83" width="4" height="4" rx="1"/><rect x="36" y="92" width="4" height="4" rx="1"/><rect x="36" y="101" width="4" height="4" rx="1"/></g>
+      <!-- miniaturas -->
+      <rect x="48" y="56" width="22" height="30" fill="#fff" stroke="#e2231a" stroke-width="1"/>
+      <rect x="48" y="92" width="22" height="30" fill="#fff"/>
+      <rect x="48" y="128" width="22" height="30" fill="#fff"/>
+      <!-- página -->
+      <rect x="80" y="55" width="138" height="140" fill="#ffffff"/>
+      <rect x="92" y="64" width="70" height="6" rx="1" fill="#1c1c1c"/>
+      <g fill="#9a9a9a">
+        <rect x="92" y="78" width="112" height="3" rx="1"/>
+        <rect x="92" y="85" width="104" height="3" rx="1"/>
+        <rect x="92" y="92" width="112" height="3" rx="1"/>
+        <rect x="92" y="99" width="96" height="3" rx="1"/>
+        <rect x="92" y="106" width="110" height="3" rx="1"/>
+        <rect x="92" y="113" width="112" height="3" rx="1"/>
+        <rect x="92" y="120" width="88" height="3" rx="1"/>
+        <rect x="92" y="127" width="108" height="3" rx="1"/>
+        <rect x="92" y="134" width="112" height="3" rx="1"/>
+        <rect x="92" y="141" width="100" height="3" rx="1"/>
+        <rect x="92" y="148" width="112" height="3" rx="1"/>
+        <rect x="92" y="155" width="84" height="3" rx="1"/>
+      </g>
+      <!-- resaltados, subrayado, tachado, nota y trazo -->
+      <rect x="90" y="83.5" width="100" height="6" fill="#ffd400" opacity=".55"/>
+      <rect x="90" y="97.5" width="70" height="6" fill="#7ce35b" opacity=".55"/>
+      <rect x="92" y="117.5" width="80" height="1.2" fill="#13a35a"/>
+      <rect x="92" y="135" width="64" height="1.2" fill="#e2231a"/>
+      <rect x="196" y="62" width="11" height="11" rx="2" fill="#ffd400" stroke="#8a7300" stroke-width=".8"/>
+      <rect x="199" y="65" width="5" height="1.3" fill="#1c1c1c"/><rect x="199" y="68" width="4" height="1.3" fill="#1c1c1c"/>
+      <path d="M150 168 q10 -12 20 0 t20 0" fill="none" stroke="#e2231a" stroke-width="1.6" stroke-linecap="round"/>
+      <!-- panel de comentarios -->
+      <rect x="226" y="50" width="82" height="132" fill="#1b1c1f"/>
+      <rect x="232" y="56" width="40" height="4" rx="1" fill="#f3f3f4"/>
+      <rect x="232" y="66" width="70" height="26" rx="3" fill="#232428"/>
+      <rect x="232" y="66" width="2" height="26" fill="#ffd400"/>
+      <rect x="238" y="71" width="28" height="2.5" rx="1" fill="#f3f3f4"/>
+      <rect x="238" y="77" width="56" height="2.5" rx="1" fill="#6f7178"/>
+      <rect x="238" y="83" width="48" height="2.5" rx="1" fill="#c9cbd1"/>
+      <rect x="232" y="97" width="70" height="20" rx="3" fill="#232428"/>
+      <rect x="232" y="97" width="2" height="20" fill="#7ce35b"/>
+      <rect x="238" y="102" width="28" height="2.5" rx="1" fill="#f3f3f4"/>
+      <rect x="238" y="108" width="52" height="2.5" rx="1" fill="#6f7178"/>
+      <rect x="232" y="122" width="70" height="20" rx="3" fill="#232428"/>
+      <rect x="232" y="122" width="2" height="20" fill="#e2231a"/>
+      <rect x="238" y="127" width="28" height="2.5" rx="1" fill="#f3f3f4"/>
+      <rect x="238" y="133" width="44" height="2.5" rx="1" fill="#6f7178"/>
+      <!-- brillo del cristal -->
+      <path d="M32 22 h276 v34 Q170 40 32 70 Z" fill="#ffffff" opacity=".05"/>
+    </g>
+    <!-- rejilla y botones -->
+    <g stroke="#6d675d" stroke-width="2" stroke-linecap="round"><path d="M28 206 v10"/><path d="M36 206 v10"/><path d="M44 206 v10"/><path d="M52 206 v10"/><path d="M60 206 v10"/><path d="M68 206 v10"/></g>
+    <circle cx="272" cy="211" r="6" fill="#8b8579"/>
+    <circle cx="292" cy="211" r="6" fill="#8b8579"/>
+    <circle cx="311" cy="211" r="3" fill="#e2231a"/>
+  </svg>
+
+  <div class="chips">
+    <div>PESTAÑAS</div>
+    <div>8 COLORES</div>
+    <div>PDFIUM INSIDE</div>
+    <div>WINDOWS 10/11</div>
+  </div>
+  <div class="note">
+    Lea atentamente este manual antes de utilizar el programa<br>y consérvelo para futuras consultas.
+  </div>
+  <div class="foot">
+    <div style="background: var(--green)"></div><div style="background: var(--white)"></div><div style="background: var(--red)"></div>
+  </div>
+</body>
+</html>

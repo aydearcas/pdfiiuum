@@ -102,6 +102,8 @@ fn find_pdfium(app: &tauri::App) -> PathBuf {
             candidates.push(dir.join(name));
         }
     }
+    // Solo en desarrollo: en la versión final no queda grabada la ruta del proyecto.
+    #[cfg(debug_assertions)]
     candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("lib").join(name));
     candidates
         .iter()
