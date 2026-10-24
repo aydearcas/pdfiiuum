@@ -18,7 +18,8 @@
   ; ProgID con icono y comando de apertura
   WriteRegStr SHCTX "Software\Classes\${PDFIIUUM_PROGID}" "" "Documento PDF"
   WriteRegStr SHCTX "Software\Classes\${PDFIIUUM_PROGID}" "FriendlyTypeName" "Documento PDF"
-  WriteRegStr SHCTX "Software\Classes\${PDFIIUUM_PROGID}\DefaultIcon" "" "$INSTDIR\${MAINBINARYNAME}.exe,0"
+  ; Icono de documento (hoja con «PDF») para los archivos; la app conserva el suyo
+  WriteRegStr SHCTX "Software\Classes\${PDFIIUUM_PROGID}\DefaultIcon" "" "$INSTDIR\pdf-document.ico"
   WriteRegStr SHCTX "Software\Classes\${PDFIIUUM_PROGID}\shell" "" "open"
   WriteRegStr SHCTX "Software\Classes\${PDFIIUUM_PROGID}\shell\open" "" "Abrir con ${PRODUCTNAME}"
   WriteRegStr SHCTX "Software\Classes\${PDFIIUUM_PROGID}\shell\open\command" "" '"$INSTDIR\${MAINBINARYNAME}.exe" "%1"'
