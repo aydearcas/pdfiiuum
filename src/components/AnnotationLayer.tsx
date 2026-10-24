@@ -28,7 +28,7 @@ import {
   smoothPathD,
   strokeAt,
 } from "../lib/ink";
-import type { Tool, ToolStyle } from "../lib/tools";
+import { isEditTool, type Tool, type ToolStyle } from "../lib/tools";
 
 export interface LayerCallbacks {
   onCreate(a: Annot): void;
@@ -409,7 +409,8 @@ function useInk(
     const toPdf = (e: { clientX: number; clientY: number }, box: DOMRect): Point =>
       latest.current.viewport.convertToPdfPoint(e.clientX - box.left, e.clientY - box.top) as Point;
     const toView = ([x, y]: Point) => latest.current.viewport.convertToViewportPoint(x, y) as Point;
-    const penDraws = () => latest.current.style.penDraws || latest.current.tool === "ink";
+    const penDraws = () =>
+      (latest.current.style.penDraws && !isEditTool(latest.current.tool)) || latest.current.tool === "ink";
 
     const modeFor = (e: PointerEvent): "draw" | "erase" | null => {
       const q = latest.current;

@@ -25,11 +25,11 @@ const SAVE_NO_INCREMENTAL: u32 = 2;
 /// Prefijo del campo NM con el que identificamos el texto insertado por la app.
 pub const TEXT_STAMP_PREFIX: &str = "pdfiiuum-text";
 
-type Bindings = Box<dyn PdfiumLibraryBindings>;
+pub(crate) type Bindings = Box<dyn PdfiumLibraryBindings>;
 
 static ENGINE: OnceLock<Result<Mutex<Bindings>, String>> = OnceLock::new();
 
-fn engine(dll: &Path) -> Result<&'static Mutex<Bindings>, String> {
+pub(crate) fn engine(dll: &Path) -> Result<&'static Mutex<Bindings>, String> {
     ENGINE
         .get_or_init(|| {
             let b = Pdfium::bind_to_library(dll)
@@ -72,7 +72,7 @@ pub fn default_author() -> String {
     std::env::var("USERNAME").unwrap_or_default()
 }
 
-fn wide(b: &Bindings, s: &str) -> Vec<u8> {
+pub(crate) fn wide(b: &Bindings, s: &str) -> Vec<u8> {
     b.get_pdfium_utf16le_bytes_from_str(s)
 }
 
@@ -549,7 +549,7 @@ mod tests {
     }
 }
 
-unsafe fn save(b: &Bindings, doc: FPDF_DOCUMENT) -> Result<Vec<u8>, String> {
+pub(crate) unsafe fn save(b: &Bindings, doc: FPDF_DOCUMENT) -> Result<Vec<u8>, String> {
     let mut writer = Writer {
         base: FPDF_FILEWRITE { version: 1, WriteBlock: Some(write_block) },
         out: Vec::new(),

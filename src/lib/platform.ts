@@ -5,6 +5,7 @@ import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { NativeExisting } from "./annotations";
+import type { TextRun } from "./edit";
 
 export const isTauri = "__TAURI_INTERNALS__" in window;
 
@@ -113,11 +114,33 @@ function framed(data: unknown, bin: Uint8Array): Uint8Array {
  * para mostrarla (null si no había ninguna).
  */
 export async function extractAnnotations(pdf: Uint8Array): Promise<{ annots: NativeExisting[]; display: Uint8Array | null }> {
-  const out = new Uint8Array(await invoke<ArrayBuffer>("extract_annotations", pdf));
+  const [annots, display] = unframe<NativeExisting[]>(await invoke<ArrayBuffer>("extract_annotations", pdf));
+  return { annots, display: display.length ? display : null };
+}
+
+/** Inverso de `framed`: el JSON ya interpretado y el binario. */
+function unframe<T>(buf: ArrayBuffer): [T, Uint8Array] {
+  const out = new Uint8Array(buf);
   const len = new DataView(out.buffer, out.byteOffset, 4).getUint32(0, true);
-  const annots = JSON.parse(new TextDecoder().decode(out.subarray(4, 4 + len))) as NativeExisting[];
-  const display = out.length > 4 + len ? out.slice(4 + len) : null;
-  return { annots, display };
+  return [JSON.parse(new TextDecoder().decode(out.subarray(4, 4 + len))) as T, out.slice(4 + len)];
+}
+
+/** Modo edición: tramos de texto que se pueden corregir en una página (desde 1). */
+export function textRuns(pdf: Uint8Array, page: number): Promise<TextRun[]> {
+  return invoke<TextRun[]>("text_runs", pdf, { headers: { page: String(page - 1) } });
+}
+
+/** Sustituye el texto de un tramo. Devuelve el PDF editado y, si lo hay, un aviso. */
+export async function editText(
+  pdf: Uint8Array,
+  page: number,
+  objects: number[],
+  text: string,
+): Promise<{ bytes: Uint8Array; notice: string | null }> {
+  const [meta, bytes] = unframe<{ notice: string | null }>(
+    await invoke<ArrayBuffer>("edit_text", framed({ page: page - 1, objects, text }, pdf)),
+  );
+  return { bytes, notice: meta.notice };
 }
 
 /** Pregunta Sí/No con el diálogo nativo (o confirm() en el navegador). */

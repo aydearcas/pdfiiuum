@@ -10,9 +10,10 @@ import CommentsPanel, { sortItems, type PanelItem } from "./CommentsPanel";
 import { bounds, diffAnnots, newId, pdfDate, toNative, type Annot, type MarkupKind } from "../lib/annotations";
 import { openDocument } from "../lib/document";
 import type { TextSelection } from "../lib/selection";
-import type { Tool, ToolStyle } from "../lib/tools";
+import { isEditTool, type Tool, type ToolStyle } from "../lib/tools";
+import type { TextRun } from "../lib/edit";
 import { useAnnotations } from "../lib/useAnnotations";
-import { baseName, getUserName, isTauri, saveAnnotated, savePdf } from "../lib/platform";
+import { baseName, editText, getUserName, isTauri, saveAnnotated, savePdf, textRuns } from "../lib/platform";
 
 /** Documento con el que se crea una pestaña. */
 export interface TabInit {
@@ -47,6 +48,8 @@ export interface TabSnapshot {
   name: string;
   annots: Annot[];
   view?: ViewState;
+  /** Hay texto corregido sin guardar (no viaja con la pestaña). */
+  edited?: boolean;
 }
 
 export interface DocTabHandle {
@@ -99,7 +102,13 @@ export default function DocTab(p: Props) {
   const { annots } = history;
   // Cambios respecto a lo guardado en el PDF (nuevas, modificadas o borradas).
   const changes = useMemo(() => diffAnnots(doc.baseline, annots), [doc.baseline, annots]);
-  const dirty = changes.dirty;
+  // Modo edición: el PDF tal como está en disco y los PDF anteriores para deshacer.
+  const diskBytes = useRef(p.init.bytes);
+  const [edits, setEdits] = useState<{ past: Uint8Array[]; future: Uint8Array[] }>({ past: [], future: [] });
+  const editBusy = useRef(false);
+  const edited = doc.bytes !== diskBytes.current;
+  const dirty = changes.dirty || edited;
+  const editMode = isEditTool(tool);
   const viewer = useRef<ViewerHandle>(null);
   const [author, setAuthor] = useState("");
   const docRef = useRef(doc);
@@ -134,6 +143,15 @@ export default function DocTab(p: Props) {
   const changesRef = useRef(changes);
   changesRef.current = changes;
 
+  // Al cambiar de PDF (guardar, corregir texto, deshacer) se libera el anterior cuando
+  // el visor y las miniaturas ya muestran el nuevo.
+  const shownPdf = useRef(doc.pdf);
+  useEffect(() => {
+    const prev = shownPdf.current;
+    shownPdf.current = doc.pdf;
+    if (prev !== doc.pdf) closePdf(prev);
+  }, [doc.pdf]);
+
   // Libera el PDF al cerrar la pestaña. Se aplaza un instante porque en desarrollo
   // React desmonta y vuelve a montar cada componente una vez (StrictMode).
   const mounted = useRef(false);
@@ -154,13 +172,13 @@ export default function DocTab(p: Props) {
       path: doc.path,
       dirty,
       saving,
-      canUndo: history.canUndo,
-      canRedo: history.canRedo,
+      canUndo: editMode ? edits.past.length > 0 : history.canUndo,
+      canRedo: editMode ? edits.future.length > 0 : history.canRedo,
       page,
       pageCount: doc.pdf.numPages,
       scale,
     });
-  }, [id, onStatus, doc, dirty, saving, history.canUndo, history.canRedo, page, scale]);
+  }, [id, onStatus, doc, dirty, saving, history.canUndo, history.canRedo, page, scale, editMode, edits]);
 
   const clearSelection = useCallback(() => {
     setSelectedId(null);
@@ -194,19 +212,25 @@ export default function DocTab(p: Props) {
       setSaving(true);
       try {
         if (!hasChanges) {
-          // Sin cambios: el archivo tal cual (pdf.js muestra una copia sin las anotaciones).
+          // Sin cambios en anotaciones: el archivo tal cual, con el texto corregido si lo hay
+          // (pdf.js muestra una copia sin las anotaciones).
           const target = await savePdf(d.bytes, d.name, d.path, saveAs || !isTauri);
           if (!target) return;
-          if (isTauri && target !== d.path) setDoc({ ...d, name: baseName(target), path: target });
+          if (isTauri) {
+            diskBytes.current = d.bytes;
+            setDoc({ ...d, name: baseName(target), path: target });
+            setEdits({ past: [], future: [] });
+          }
           notify(isTauri ? `Guardado: ${baseName(target)}` : "Descarga iniciada");
           return;
         }
         const result = await saveAnnotated(d.bytes, { remove, add: add.map(toNative) }, d.name, d.path, saveAs);
         if (!result) return;
+        diskBytes.current = result.bytes;
+        setEdits({ past: [], future: [] });
         // Recarga lo guardado: sus anotaciones vuelven a ser la base editable.
         const view = viewer.current?.viewState();
         const reopened = await openDocument(result.bytes);
-        closePdf(d.pdf);
         setDoc({ ...reopened, bytes: result.bytes, name: baseName(result.path), path: result.path, view });
         history.reset(reopened.baseline);
         clearSelection();
@@ -275,12 +299,79 @@ export default function DocTab(p: Props) {
     [history.remove],
   );
 
+  // ---------- Modo edición ----------
+
+  /** Muestra otro PDF (corregido, o el anterior al deshacer) conservando la vista y las anotaciones. */
+  const showBytes = useCallback(async (bytes: Uint8Array) => {
+    const d = docRef.current;
+    const view = viewer.current?.viewState();
+    const reopened = await openDocument(bytes);
+    setDoc({ ...d, ...reopened, bytes, view });
+  }, []);
+
+  // Tramos de cada página, leídos una vez por versión del PDF.
+  const runsCache = useMemo(() => new Map<number, Promise<TextRun[]>>(), [doc.bytes]);
+  const getRuns = useCallback(
+    (n: number) => {
+      let runs = runsCache.get(n);
+      if (!runs) {
+        runs = textRuns(doc.bytes, n);
+        runsCache.set(n, runs);
+      }
+      return runs;
+    },
+    [runsCache, doc.bytes],
+  );
+
+  const editRun = useCallback(
+    async (n: number, run: TextRun, text: string) => {
+      if (editBusy.current) return false;
+      editBusy.current = true;
+      const before = docRef.current.bytes;
+      try {
+        const result = await editText(before, n, run.objects, text);
+        await showBytes(result.bytes);
+        setEdits((s) => ({ past: [...s.past, before].slice(-50), future: [] }));
+        if (result.notice) notify(result.notice);
+        return true;
+      } catch (e) {
+        notify(`No se pudo corregir el texto: ${e instanceof Error ? e.message : e}`, true);
+        return false;
+      } finally {
+        editBusy.current = false;
+      }
+    },
+    [showBytes, notify],
+  );
+
+  const undoEdit = useCallback(
+    async (redo: boolean) => {
+      const from = redo ? edits.future : edits.past;
+      if (editBusy.current || !from.length) return;
+      editBusy.current = true;
+      const current = docRef.current.bytes;
+      const target = redo ? from[0] : from[from.length - 1];
+      try {
+        await showBytes(target);
+        setEdits((s) =>
+          redo
+            ? { past: [...s.past, current], future: s.future.slice(1) }
+            : { past: s.past.slice(0, -1), future: [current, ...s.future] },
+        );
+      } finally {
+        editBusy.current = false;
+      }
+    },
+    [edits, showBytes],
+  );
+
   useImperativeHandle(
     p.ref,
     () => ({
       save,
-      undo: history.undo,
-      redo: history.redo,
+      // En el modo edición, deshacer se refiere a las correcciones del texto.
+      undo: editMode ? () => void undoEdit(false) : history.undo,
+      redo: editMode ? () => void undoEdit(true) : history.redo,
       zoomIn: () => viewer.current?.zoomIn(),
       zoomOut: () => viewer.current?.zoomOut(),
       setScale: (v) => viewer.current?.setScale(v),
@@ -298,9 +389,10 @@ export default function DocTab(p: Props) {
         name: docRef.current.name,
         annots: annotsRef.current,
         view: viewer.current?.viewState(),
+        edited: docRef.current.bytes !== diskBytes.current,
       }),
     }),
-    [save, history.undo, history.redo, selectedId, onDelete, clearSelection],
+    [save, history.undo, history.redo, selectedId, onDelete, clearSelection, editMode, undoEdit],
   );
 
   // Panel lateral: notas y marcas en orden de lectura; «Sin guardar» las nuevas o cambiadas.
@@ -397,7 +489,14 @@ export default function DocTab(p: Props) {
           onChange={history.change}
           onDelete={onDelete}
           onEdit={setEditingId}
+          getRuns={getRuns}
+          onEditRun={editRun}
         />
+        {active && editMode && (
+          <div className="edit-hint">
+            Haz clic en un texto para corregirlo · Intro aplica · Esc cancela · Ctrl+Z deshace
+          </div>
+        )}
         {searchOpen && (
           <SearchBar
             status={findStatus}

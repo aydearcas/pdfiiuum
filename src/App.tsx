@@ -41,6 +41,8 @@ const TOOL_KEYS: Record<string, Tool> = {
   k: "strikeout",
   t: "text",
   d: "ink",
+  // Modo edición: solo en la app de escritorio (necesita PDFium).
+  ...(isTauri ? { e: "edittext" as const } : {}),
 };
 
 const COMMENTS_PREF = "pdfiiuum.commentsOpen";
@@ -214,6 +216,10 @@ export default function App() {
     async (id: string) => {
       const snap = handles.current.get(id)?.snapshot();
       if (!snap?.path) return;
+      if (snap.edited) {
+        notify("Guarda el PDF antes de moverlo a otra ventana: el texto corregido aún no está en el archivo", true);
+        return;
+      }
       const sole = tabsRef.current.length === 1;
       try {
         const result = await dropTab(snap, sole);

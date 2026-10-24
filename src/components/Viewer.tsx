@@ -13,6 +13,8 @@ import { contains, type Annot, type MarkupKind, type Point } from "../lib/annota
 import { readSelection, type TextSelection } from "../lib/selection";
 import { isMarkupTool, type Tool, type ToolStyle } from "../lib/tools";
 import AnnotationLayer, { type LayerCallbacks } from "./AnnotationLayer";
+import EditLayer from "./EditLayer";
+import type { TextRun } from "../lib/edit";
 
 export interface FindStatus {
   current: number;
@@ -61,6 +63,9 @@ interface Props extends LayerCallbacks {
   onMarkup(kind: MarkupKind, sel: TextSelection): void;
   /** Clic derecho sobre una anotación pendiente. */
   onAnnotMenu(id: string, at: DOMRect): void;
+  /** Modo edición: tramos de texto de una página y su corrección. */
+  getRuns(page: number): Promise<TextRun[]>;
+  onEditRun(page: number, run: TextRun, text: string): Promise<boolean>;
 }
 
 const MIN_SCALE = 0.1;
@@ -322,21 +327,31 @@ export default function Viewer(props: Props) {
       {viewer &&
         pageViews.map(({ page, host }) =>
           createPortal(
-            <AnnotationLayer
-              page={page}
-              viewport={viewer.getPageView(page - 1).viewport}
-              annots={props.annots.filter((a) => a.page === page)}
-              selectedId={props.selectedId}
-              editingId={props.editingId}
-              tool={tool}
-              style={props.style}
-              onCreate={props.onCreate}
-              onSelect={props.onSelect}
-              onBegin={props.onBegin}
-              onChange={props.onChange}
-              onDelete={props.onDelete}
-              onEdit={props.onEdit}
-            />,
+            <>
+              <AnnotationLayer
+                page={page}
+                viewport={viewer.getPageView(page - 1).viewport}
+                annots={props.annots.filter((a) => a.page === page)}
+                selectedId={props.selectedId}
+                editingId={props.editingId}
+                tool={tool}
+                style={props.style}
+                onCreate={props.onCreate}
+                onSelect={props.onSelect}
+                onBegin={props.onBegin}
+                onChange={props.onChange}
+                onDelete={props.onDelete}
+                onEdit={props.onEdit}
+              />
+              {tool === "edittext" && (
+                <EditLayer
+                  page={page}
+                  viewport={viewer.getPageView(page - 1).viewport}
+                  getRuns={props.getRuns}
+                  onEdit={props.onEditRun}
+                />
+              )}
+            </>,
             host,
             String(page),
           ),

@@ -1,6 +1,10 @@
 import type { AnnotKind, MarkupKind } from "./annotations";
 
-export type Tool = "select" | "hand" | AnnotKind;
+/** Herramientas del modo edición (cambian el contenido del PDF; solo en escritorio). */
+export type EditTool = "edittext";
+export type Tool = "select" | "hand" | AnnotKind | EditTool;
+
+export const isEditTool = (t: Tool): t is EditTool => t === "edittext";
 
 export const MARKUP_TOOLS: MarkupKind[] = ["highlight", "underline", "strikeout"];
 

@@ -55,6 +55,7 @@ El icono muestra ✓ cuando el PDF se ha abierto y ! si algo ha fallado (al pasa
 - Instalador para Windows que registra pdfiiuum en «Abrir con» y en Aplicaciones predeterminadas, y una sola instancia: los PDF abiertos desde el Explorador entran como pestañas.
 - Lápiz digital: dibuja con cualquier herramienta, borra con la goma o el botón lateral y agrupa los trazos de cada palabra.
 - Extensión del navegador «Abrir en pdfiiuum».
+- Modo edición (solo escritorio): **Corregir texto** (E) reescribe una línea del PDF con su tipografía, tamaño, color y posición. Si la tipografía incrustada no tiene alguna letra, esa letra se escribe con una parecida (Helvetica, Times, Courier o, para otros alfabetos, Arial, Times New Roman o Courier New) y se avisa. No recoloca el párrafo, no edita texto girado ni escaneado.
 
 ## Tecnología
 
@@ -89,6 +90,7 @@ Cierra y vuelve a abrir la terminal después de instalar Rust. También hace fal
 - `src-tauri/src/pdf_engine.rs` — escritura de anotaciones con PDFium.
 - `src-tauri/src/windows.rs` — varias ventanas, mover pestañas e instancia única.
 - `src-tauri/windows/hooks.nsh` — registro del instalador como lector de PDF y del puente con la extensión.
+- `src-tauri/src/pdf_edit.rs` — modo edición: tramos de texto de cada página y su corrección con PDFium.
 - `src-tauri/src/native_host.rs` — puente con la extensión: Edge o Chrome arrancan `pdfiiuum.exe chrome-extension://…` y le pasan el PDF por mensajería nativa.
 - `browser-extension/` — extensión «Abrir en pdfiiuum». Su identificador (`ehgjjipbmdcgnpmfclngigpianjmnalh`) sale de la clave pública `key` de `manifest.json` y debe coincidir con `allowed_origins` en `src-tauri/windows/native-messaging-host.json`. La clave privada no está en el repositorio: solo hace falta para publicarla en la Chrome Web Store con el mismo identificador.
 

@@ -1,4 +1,5 @@
 pub mod native_host;
+mod pdf_edit;
 mod pdf_engine;
 mod windows;
 
@@ -121,6 +122,49 @@ async fn extract_annotations(request: Request<'_>, pdfium: tauri::State<'_, Pdfi
     .map_err(|e| e.to_string())?
 }
 
+fn page_header(request: &Request<'_>) -> Result<i32, String> {
+    request
+        .headers()
+        .get("page")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse().ok())
+        .ok_or_else(|| "Falta la página".to_string())
+}
+
+/// Modo edición. Cuerpo: el PDF; cabecera `page` (desde 0). Respuesta: tramos de texto editables.
+#[tauri::command]
+async fn text_runs(request: Request<'_>, pdfium: tauri::State<'_, PdfiumPath>) -> Result<Vec<pdf_edit::TextRun>, String> {
+    let page = page_header(&request)?;
+    let pdf = raw_body(&request)?.to_vec();
+    let dll = pdfium.0.clone();
+    tauri::async_runtime::spawn_blocking(move || pdf_edit::text_runs(&dll, &pdf, page))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+#[derive(serde::Deserialize)]
+struct EditTextRequest {
+    page: i32,
+    objects: Vec<i32>,
+    text: String,
+}
+
+/// Cuerpo: [JSON {page, objects, text}][PDF]. Respuesta: [JSON {notice}][PDF editado].
+#[tauri::command]
+async fn edit_text(request: Request<'_>, pdfium: tauri::State<'_, PdfiumPath>) -> Result<Response, String> {
+    let (json, pdf) = split_framed(raw_body(&request)?)?;
+    let req: EditTextRequest = serde_json::from_slice(json).map_err(|e| e.to_string())?;
+    let pdf = pdf.to_vec();
+    let dll = pdfium.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = pdf_edit::edit_text(&dll, &pdf, req.page, &req.objects, &req.text)?;
+        let json = serde_json::to_vec(&serde_json::json!({ "notice": out.notice })).map_err(|e| e.to_string())?;
+        Ok(Response::new(framed(&json, &out.pdf)))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Nombre de usuario de Windows: autor de los comentarios.
 #[tauri::command]
 fn user_name() -> String {
@@ -183,6 +227,8 @@ pub fn run() {
             write_pdf,
             save_annotated,
             extract_annotations,
+            text_runs,
+            edit_text,
             user_name,
             windows::drop_tab,
             windows::take_window_payload

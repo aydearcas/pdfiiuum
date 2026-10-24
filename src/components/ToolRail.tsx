@@ -6,12 +6,14 @@ import {
   MousePointer2,
   PenLine,
   Strikethrough,
+  TextCursorInput,
   Type,
   Underline,
 } from "lucide-react";
 import IconButton from "./IconButton";
 import { FONT_SIZES, INK_WIDTHS, paletteFor, type AnnotKind } from "../lib/annotations";
-import type { Tool, ToolStyle } from "../lib/tools";
+import { isTauri } from "../lib/platform";
+import { isEditTool, type Tool, type ToolStyle } from "../lib/tools";
 
 interface Props {
   tool: Tool;
@@ -32,7 +34,7 @@ const ANNOT_TOOLS: { tool: AnnotKind; icon: typeof Hand; label: string }[] = [
 
 export default function ToolRail({ tool, style, disabled, onTool, onStyle }: Props) {
   const [optionsOpen, setOptionsOpen] = useState(false);
-  const annotTool = tool !== "select" && tool !== "hand" ? tool : null;
+  const annotTool = tool !== "select" && tool !== "hand" && !isEditTool(tool) ? tool : null;
 
   useEffect(() => {
     if (!optionsOpen) return;
@@ -58,6 +60,20 @@ export default function ToolRail({ tool, style, disabled, onTool, onStyle }: Pro
           onClick={() => onTool(tool === t.tool ? "select" : t.tool)}
         />
       ))}
+
+      {/* Modo edición: cambia el contenido del PDF, no son anotaciones. */}
+      {isTauri && (
+        <>
+          <span className="divider horizontal" />
+          <IconButton
+            icon={TextCursorInput}
+            label="Corregir texto del PDF (E)"
+            active={tool === "edittext"}
+            disabled={disabled}
+            onClick={() => onTool(tool === "edittext" ? "select" : "edittext")}
+          />
+        </>
+      )}
 
       {annotTool && (
         <div className="tool-options-anchor">
