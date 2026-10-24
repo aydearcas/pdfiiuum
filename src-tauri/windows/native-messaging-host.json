@@ -1,0 +1,7 @@
+{
+  "name": "com.pdfiiuum.open",
+  "description": "pdfiiuum: abre en la app los PDF que le pasa la extensión del navegador",
+  "path": "pdfiiuum.exe",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://ehgjjipbmdcgnpmfclngigpianjmnalh/"]
+}

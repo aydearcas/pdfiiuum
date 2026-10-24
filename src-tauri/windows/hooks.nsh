@@ -5,6 +5,8 @@
 
 !define PDFIIUUM_PROGID "pdfiiuum.pdf"
 !define PDFIIUUM_CAPS "Software\pdfiiuum\Capabilities"
+; Puente con la extensión del navegador (mensajería nativa de Edge, Chrome y Brave)
+!define PDFIIUUM_HOST "com.pdfiiuum.open"
 
 !macro NSIS_HOOK_POSTINSTALL
   ; ProgID con icono y comando de apertura
@@ -28,6 +30,11 @@
   WriteRegStr SHCTX "${PDFIIUUM_CAPS}\FileAssociations" ".pdf" "${PDFIIUUM_PROGID}"
   WriteRegStr SHCTX "Software\RegisteredApplications" "${PRODUCTNAME}" "${PDFIIUUM_CAPS}"
 
+  ; La extensión «Abrir en pdfiiuum» habla con pdfiiuum.exe a través de este manifiesto
+  WriteRegStr SHCTX "Software\Microsoft\Edge\NativeMessagingHosts\${PDFIIUUM_HOST}" "" "$INSTDIR\native-messaging-host.json"
+  WriteRegStr SHCTX "Software\Google\Chrome\NativeMessagingHosts\${PDFIIUUM_HOST}" "" "$INSTDIR\native-messaging-host.json"
+  WriteRegStr SHCTX "Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\${PDFIIUUM_HOST}" "" "$INSTDIR\native-messaging-host.json"
+
   ; Avisa al Explorador de que han cambiado las asociaciones
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 !macroend
@@ -38,5 +45,8 @@
   DeleteRegKey SHCTX "Software\Classes\Applications\${MAINBINARYNAME}.exe"
   DeleteRegValue SHCTX "Software\RegisteredApplications" "${PRODUCTNAME}"
   DeleteRegKey SHCTX "Software\pdfiiuum"
+  DeleteRegKey SHCTX "Software\Microsoft\Edge\NativeMessagingHosts\${PDFIIUUM_HOST}"
+  DeleteRegKey SHCTX "Software\Google\Chrome\NativeMessagingHosts\${PDFIIUUM_HOST}"
+  DeleteRegKey SHCTX "Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\${PDFIIUUM_HOST}"
   System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 !macroend

@@ -2467,6 +2467,8 @@ dependencies = [
 name = "pdfiiuum"
 version = "0.2.1"
 dependencies = [
+ "base64 0.22.1",
+ "dirs",
  "pdfium-render",
  "serde",
  "serde_json",

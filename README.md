@@ -34,6 +34,17 @@ pdfiiuum es un lector de PDF de escritorio para Windows, ligero y con interfaz o
 3. La primera vez Windows puede mostrar «Windows protegió su PC», porque el instalador no está firmado: pulsa **Más información → Ejecutar de todas formas**.
 4. Para abrir los PDF con doble clic: clic derecho en un PDF → **Abrir con → Elegir otra aplicación → pdfiiuum → Siempre**.
 
+### Extensión para Edge, Chrome y Brave
+
+Añade un botón **Abrir en pdfiiuum** (y la misma opción en el menú del botón derecho sobre una página o un enlace) que descarga el PDF con tu sesión del navegador, lo guarda en **Descargas** y lo abre en pdfiiuum. Funciona también con PDF que piden iniciar sesión y con PDF locales (`file://`).
+
+1. Instala pdfiiuum (el instalador deja la extensión en `C:\Program Files\pdfiiuum\extension` y la conecta con la app).
+2. Abre `edge://extensions` (o `chrome://extensions`, `brave://extensions`) y activa **Modo de desarrollador**.
+3. Pulsa **Cargar desempaquetada** y elige la carpeta `extension` de la instalación.
+4. Para los PDF locales, en los detalles de la extensión activa **Permitir el acceso a las URL de archivo**.
+
+El icono muestra ✓ cuando el PDF se ha abierto y ! si algo ha fallado (al pasar el ratón por encima se ve el motivo).
+
 ## Funciones
 
 - Pestañas: reordenar arrastrando, sacar una pestaña a una ventana nueva o moverla a otra ventana.
@@ -42,6 +53,8 @@ pdfiiuum es un lector de PDF de escritorio para Windows, ligero y con interfaz o
 - Panel lateral con todos los comentarios y resaltados del documento, en orden de lectura. El autor es el usuario de Windows.
 - Búsqueda, miniaturas, zoom y giro de la vista.
 - Instalador para Windows que registra pdfiiuum en «Abrir con» y en Aplicaciones predeterminadas, y una sola instancia: los PDF abiertos desde el Explorador entran como pestañas.
+- Lápiz digital: dibuja con cualquier herramienta, borra con la goma o el botón lateral y agrupa los trazos de cada palabra.
+- Extensión del navegador «Abrir en pdfiiuum».
 
 ## Tecnología
 
@@ -75,7 +88,9 @@ Cierra y vuelve a abrir la terminal después de instalar Rust. También hace fal
 - `src/lib/annotations.ts` — modelo de anotaciones pendientes (coordenadas PDF).
 - `src-tauri/src/pdf_engine.rs` — escritura de anotaciones con PDFium.
 - `src-tauri/src/windows.rs` — varias ventanas, mover pestañas e instancia única.
-- `src-tauri/windows/hooks.nsh` — registro del instalador como lector de PDF.
+- `src-tauri/windows/hooks.nsh` — registro del instalador como lector de PDF y del puente con la extensión.
+- `src-tauri/src/native_host.rs` — puente con la extensión: Edge o Chrome arrancan `pdfiiuum.exe chrome-extension://…` y le pasan el PDF por mensajería nativa.
+- `browser-extension/` — extensión «Abrir en pdfiiuum». Su identificador (`ehgjjipbmdcgnpmfclngigpianjmnalh`) sale de la clave pública `key` de `manifest.json` y debe coincidir con `allowed_origins` en `src-tauri/windows/native-messaging-host.json`. La clave privada no está en el repositorio: solo hace falta para publicarla en la Chrome Web Store con el mismo identificador.
 
 ## Licencia
 

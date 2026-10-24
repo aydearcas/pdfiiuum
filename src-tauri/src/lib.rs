@@ -1,3 +1,4 @@
+pub mod native_host;
 mod pdf_engine;
 mod windows;
 

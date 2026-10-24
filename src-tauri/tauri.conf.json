@@ -37,7 +37,11 @@
     ],
     "resources": {
       "lib/pdfium.dll": "pdfium.dll",
-      "lib/PDFIUM-LICENSE": "PDFIUM-LICENSE"
+      "lib/PDFIUM-LICENSE": "PDFIUM-LICENSE",
+      "windows/native-messaging-host.json": "native-messaging-host.json",
+      "../browser-extension/manifest.json": "extension/manifest.json",
+      "../browser-extension/background.js": "extension/background.js",
+      "../browser-extension/icons/*": "extension/icons/"
     },
     "publisher": "pdfiiuum",
     "copyright": "© 2026 pdfiiuum",
