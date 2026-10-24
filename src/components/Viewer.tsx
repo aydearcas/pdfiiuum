@@ -109,7 +109,10 @@ export default function Viewer(props: Props) {
         viewer.currentScaleValue = String(init.scale);
         if (init.scrollTop != null) container.scrollTop = init.scrollTop;
         else viewer.currentPageNumber = init.page;
-      } else viewer.currentScaleValue = "page-width";
+      } else {
+        // Los PDF se abren al 100 % (tamaño real).
+        viewer.currentScale = 1;
+      }
       setLayoutTick((t) => t + 1);
     });
     eventBus.on("pagechanging", (e: { pageNumber: number }) => cbs.current.onPageChange(e.pageNumber));

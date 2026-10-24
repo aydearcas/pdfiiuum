@@ -325,7 +325,7 @@ export default function App() {
       else if (mod && k === "f") go(() => tab.toggleSearch(true));
       else if (mod && (k === "+" || k === "=")) go(tab.zoomIn);
       else if (mod && k === "-") go(tab.zoomOut);
-      else if (mod && k === "0") go(() => tab.setScale("page-width"));
+      else if (mod && k === "0") go(() => tab.setScale(1));
       else if (typing) return;
       else if (mod && k === "z") go(e.shiftKey ? tab.redo : tab.undo);
       else if (mod && k === "y") go(tab.redo);
