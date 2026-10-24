@@ -1,27 +1,131 @@
-// «Abrir en pdfiiuum»: descarga el PDF con la sesión del navegador (sirve aunque haga falta
-// iniciar sesión) y se lo pasa a la app instalada por mensajería nativa. El puente es el propio
-// pdfiiuum.exe; el instalador lo registra con el nombre HOST.
+// pdfiiuum en el navegador:
+// - Los PDF que abre el navegador se muestran en el visor de pdfiiuum (viewer/viewer.html),
+//   salvo que se desactive en la ventana de la extensión. El visor usa el PDFium de la app
+//   instalada a través del puente de mensajería nativa.
+// - «Abrir en pdfiiuum» (menú contextual y ventana de la extensión) descarga el PDF con la
+//   sesión del navegador y lo abre en la app de escritorio.
 
 const HOST = "com.pdfiiuum.open";
 /** Trozo de cada mensaje: 6 MB en binario son 8 MB en base64 (el límite es 64 MB). */
 const CHUNK = 6 * 1024 * 1024;
 const MAX_PDF = 1024 * 1024 * 1024;
+const VIEWER = chrome.runtime.getURL("viewer/viewer.html");
+/** Regla que lleva al visor las respuestas PDF que se abren en una pestaña. */
+const RULE_ID = 1;
+/** Reglas de sesión que dejan ver un PDF con el visor del navegador en una pestaña concreta. */
+const BYPASS_BASE = 1000;
 
 chrome.runtime.onInstalled.addListener(() => {
   chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: "open-link", title: "Abrir enlace en pdfiiuum", contexts: ["link"] });
-    chrome.contextMenus.create({ id: "open-page", title: "Abrir en pdfiiuum", contexts: ["page", "frame"] });
+    chrome.contextMenus.create({ id: "open-link", title: "Abrir enlace en la app de pdfiiuum", contexts: ["link"] });
+    chrome.contextMenus.create({ id: "open-page", title: "Abrir en la app de pdfiiuum", contexts: ["page", "frame"] });
   });
+  applyViewerSetting();
 });
+chrome.runtime.onStartup.addListener(applyViewerSetting);
 
-chrome.action.onClicked.addListener((tab) => open(tab.url, tab.id));
+/** ¿Se abren los PDF en el visor de pdfiiuum? (por defecto, sí) */
+async function viewerEnabled() {
+  const { viewer = true } = await chrome.storage.local.get("viewer");
+  return viewer;
+}
+
+async function applyViewerSetting() {
+  const enabled = await viewerEnabled();
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds: [RULE_ID],
+    addRules: enabled
+      ? [
+          {
+            id: RULE_ID,
+            priority: 1,
+            action: { type: "redirect", redirect: { regexSubstitution: `${VIEWER}?file=\\0` } },
+            condition: {
+              regexFilter: "^https?://.*",
+              resourceTypes: ["main_frame"],
+              responseHeaders: [{ header: "content-type", values: ["application/pdf*"] }],
+              // Si el servidor pide descargarlo, se respeta.
+              excludedResponseHeaders: [{ header: "content-disposition", values: ["attachment*"] }],
+            },
+          },
+        ]
+      : [],
+  });
+}
+
+chrome.tabs.onUpdated.addListener(async (tabId, change) => {
+  const url = change.url;
+  if (!url) return;
+  // La excepción para ver un PDF con el visor del navegador dura hasta salir de ese PDF.
+  const bypassed = await bypassedUrl(tabId);
+  if (bypassed && url !== bypassed) await clearBypass(tabId);
+  else if (bypassed) return;
+  // Los PDF del equipo (file://) no pasan por las reglas de red: se redirigen al cargar.
+  if (url.startsWith("file:") && /\.pdf$/i.test(new URL(url).pathname) && (await viewerEnabled())) {
+    chrome.tabs.update(tabId, { url: `${VIEWER}?file=${url}` });
+  }
+});
+chrome.tabs.onRemoved.addListener((tabId) => clearBypass(tabId));
+
+async function bypassedUrl(tabId) {
+  const { bypass = {} } = await chrome.storage.session.get("bypass");
+  return bypass[tabId];
+}
+
+async function clearBypass(tabId) {
+  const { bypass = {} } = await chrome.storage.session.get("bypass");
+  delete bypass[tabId];
+  await chrome.storage.session.set({ bypass });
+  await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [BYPASS_BASE + tabId] });
+}
 
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   const url = info.menuItemId === "open-link" ? info.linkUrl : info.frameUrl || info.pageUrl;
   open(url, tab?.id);
 });
 
-async function open(url, tabId) {
+// Mensajes de la ventana de la extensión y del visor.
+chrome.runtime.onMessage.addListener((msg, sender, reply) => {
+  (async () => {
+    if (msg.type === "get-viewer") return { enabled: await viewerEnabled() };
+    if (msg.type === "set-viewer") {
+      await chrome.storage.local.set({ viewer: msg.enabled });
+      await applyViewerSetting();
+      return { enabled: msg.enabled };
+    }
+    if (msg.type === "open-in-app") return open(msg.url, msg.tabId);
+    if (msg.type === "browser-viewer") return showInBrowserViewer(sender.tab?.id ?? msg.tabId, msg.url);
+  })().then(reply, (e) => reply({ error: e.message }));
+  return true;
+});
+
+/** Vuelve a abrir el PDF en la pestaña con el visor propio del navegador. */
+async function showInBrowserViewer(tabId, url) {
+  if (tabId == null || !url) return;
+  const { bypass = {} } = await chrome.storage.session.get("bypass");
+  await chrome.storage.session.set({ bypass: { ...bypass, [tabId]: url } });
+  await chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [BYPASS_BASE + tabId],
+    addRules: [
+      {
+        id: BYPASS_BASE + tabId,
+        priority: 2,
+        action: { type: "allow" },
+        condition: { tabIds: [tabId], resourceTypes: ["main_frame"] },
+      },
+    ],
+  });
+  await chrome.tabs.update(tabId, { url });
+}
+
+/** Dirección del PDF: la de la pestaña o, si es el visor de pdfiiuum, la del PDF que muestra. */
+export function pdfUrlOf(url) {
+  if (url?.startsWith(VIEWER)) return url.slice(url.indexOf("?file=") + 6);
+  return url;
+}
+
+async function open(rawUrl, tabId) {
+  const url = pdfUrlOf(rawUrl);
   if (!url) return;
   await badge(tabId, "…", "#5b6170", "Abriendo en pdfiiuum…");
   try {
@@ -29,8 +133,10 @@ async function open(url, tabId) {
     const reply = await sendToApp(message);
     if (!reply?.ok) throw new Error(reply?.error || "pdfiiuum no respondió");
     await badge(tabId, "✓", "#13a35a", "Abierto en pdfiiuum");
+    return { ok: true };
   } catch (e) {
     await badge(tabId, "!", "#e2231a", `No se pudo abrir en pdfiiuum: ${e.message}`);
+    return { error: e.message };
   }
 }
 
@@ -126,7 +232,7 @@ async function badge(tabId, text, color, title) {
   if (text !== "…") {
     setTimeout(() => {
       chrome.action.setBadgeText({ tabId, text: "" }).catch(() => {});
-      chrome.action.setTitle({ tabId, title: "Abrir en pdfiiuum" }).catch(() => {});
+      chrome.action.setTitle({ tabId, title: "pdfiiuum" }).catch(() => {});
     }, 5000);
   }
 }

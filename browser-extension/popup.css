@@ -1,0 +1,62 @@
+:root {
+  --bg: #232428;
+  --panel: #2b2d32;
+  --border: #33353b;
+  --text: #f3f3f4;
+  --muted: #9b9da5;
+  --accent: #e2231a;
+}
+body {
+  width: 290px;
+  margin: 0;
+  padding: 14px;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.45 "Segoe UI", system-ui, sans-serif;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: 14px;
+}
+.switch {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  cursor: pointer;
+}
+.switch input {
+  margin: 2px 0 0;
+  accent-color: var(--accent);
+}
+.hint,
+.status {
+  margin: 6px 0 12px 22px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.status:empty {
+  display: none;
+}
+.status {
+  margin-left: 0;
+}
+button {
+  width: 100%;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}

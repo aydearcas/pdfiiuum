@@ -2,7 +2,7 @@
 // y pdf.js muestra una copia del PDF sin ellas (para no dibujarlas dos veces).
 import { loadPdf, type PDFDocument } from "./pdf";
 import { fromNative, type Annot, type Rect } from "./annotations";
-import { extractAnnotations, isTauri } from "./platform";
+import { extractAnnotations, hasPdfium } from "./platform";
 
 export interface OpenedDocument {
   pdf: PDFDocument;
@@ -11,7 +11,7 @@ export interface OpenedDocument {
 }
 
 export async function openDocument(bytes: Uint8Array): Promise<OpenedDocument> {
-  const extracted = isTauri ? await extractAnnotations(bytes).catch(() => null) : null;
+  const extracted = hasPdfium ? await extractAnnotations(bytes).catch(() => null) : null;
   const pdf = await loadPdf(extracted?.display ?? bytes);
   const baseline = extracted ? await withQuotes(pdf, extracted.annots.map(fromNative)) : [];
   return { pdf, baseline };

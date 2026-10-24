@@ -1,16 +1,17 @@
 {
   "name": "pdfiiuum",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "license": "GPL-3.0-or-later",
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && vite build --config vite.extension.config.ts",
     "preview": "vite preview",
     "tauri": "tauri",
     "release": "node scripts/build.mjs",
-    "postinstall": "node scripts/copy-pdfjs-assets.mjs"
+    "postinstall": "node scripts/copy-pdfjs-assets.mjs",
+    "build:extension": "vite build --config vite.extension.config.ts"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.4",

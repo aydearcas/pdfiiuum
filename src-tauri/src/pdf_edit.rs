@@ -93,8 +93,9 @@ pub enum PageEdit {
     /// Mover o cambiar de tamaño un objeto para que ocupe `rect`.
     Move { index: i32, rect: [f32; 4] },
     Delete { indices: Vec<i32> },
-    /// Imagen de un archivo, centrada en `center` y reducida para caber en `max` (ancho, alto).
-    AddImage { path: String, center: [f32; 2], max: [f32; 2] },
+    /// Imagen (de una ruta o, en el visor del navegador, en base64), centrada en `center` y
+    /// reducida para caber en `max` (ancho, alto).
+    AddImage { path: Option<String>, data: Option<String>, center: [f32; 2], max: [f32; 2] },
     /// Rectángulo blanco que tapa la zona; quita lo que quede entero debajo.
     Cover { rect: [f32; 4] },
 }
@@ -172,8 +173,9 @@ pub fn edit_page(dll: &Path, pdf: &[u8], page: i32, edit: &PageEdit) -> Result<E
                     }
                     None
                 }
-                PageEdit::AddImage { path, center, max } => {
-                    add_image(b, doc, page, Path::new(path), *center, *max)?;
+                PageEdit::AddImage { path, data, center, max } => {
+                    let bytes = read_source(path, data, "la imagen")?;
+                    add_image(b, doc, page, &bytes, *center, *max)?;
                     None
                 }
                 PageEdit::Cover { rect } => cover(b, page, *rect),
@@ -183,6 +185,19 @@ pub fn edit_page(dll: &Path, pdf: &[u8], page: i32, edit: &PageEdit) -> Result<E
             }
             Ok(Edited { pdf: save(b, doc)?, notice })
         })
+    }
+}
+
+/// Contenido de un archivo de entrada: por ruta (app de escritorio) o en base64 (visor del
+/// navegador, que no puede pasar rutas).
+pub(crate) fn read_source(path: &Option<String>, data: &Option<String>, what: &str) -> Result<Vec<u8>, String> {
+    use base64::Engine;
+    match (path, data) {
+        (_, Some(d)) => base64::engine::general_purpose::STANDARD
+            .decode(d)
+            .map_err(|e| format!("No se pudo leer {what}: {e}")),
+        (Some(p), None) => std::fs::read(p).map_err(|e| format!("No se pudo leer {what}: {e}")),
+        (None, None) => Err(format!("Falta {what}")),
     }
 }
 
@@ -312,11 +327,10 @@ unsafe fn add_image(
     b: &Bindings,
     doc: FPDF_DOCUMENT,
     page: FPDF_PAGE,
-    path: &Path,
+    data: &[u8],
     [cx, cy]: [f32; 2],
     [max_w, max_h]: [f32; 2],
 ) -> Result<(), String> {
-    let data = std::fs::read(path).map_err(|e| format!("No se pudo leer la imagen: {e}"))?;
     let img = image::load_from_memory(&data).map_err(|e| format!("No es una imagen válida: {e}"))?;
     let (pw, ph) = (img.width() as f32, img.height() as f32);
     // A 96 ppp (como en pantalla), reducida si no cabe.
@@ -328,7 +342,7 @@ unsafe fn add_image(
         return Err("No se pudo crear la imagen".into());
     }
     let ok = if data.starts_with(&[0xFF, 0xD8]) {
-        let mut reader = MemoryReader(&data);
+        let mut reader = MemoryReader(data);
         let mut access = FPDF_FILEACCESS {
             m_FileLen: data.len() as _,
             m_GetBlock: Some(read_block),
@@ -870,7 +884,7 @@ mod tests {
             &dll(),
             &added.pdf,
             0,
-            &PageEdit::AddImage { path: png.to_string_lossy().into(), center: [300.0, 400.0], max: [500.0, 500.0] },
+            &PageEdit::AddImage { path: Some(png.to_string_lossy().into()), data: None, center: [300.0, 400.0], max: [500.0, 500.0] },
         )
         .unwrap();
         let content = page_content(&dll(), &with_image.pdf, 0).unwrap();
@@ -912,7 +926,7 @@ mod tests {
             &dll(),
             &sample(),
             0,
-            &PageEdit::AddImage { path: jpg.to_string_lossy().into(), center: [300.0, 400.0], max: [100.0, 100.0] },
+            &PageEdit::AddImage { path: Some(jpg.to_string_lossy().into()), data: None, center: [300.0, 400.0], max: [100.0, 100.0] },
         )
         .unwrap();
         let r = page_content(&dll(), &out.pdf, 0).unwrap().images[0].rect;

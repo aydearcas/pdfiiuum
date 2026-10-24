@@ -21,8 +21,8 @@ pub enum PagesEdit {
     Move { pages: Vec<i32>, to: i32 },
     /// Página en blanco del tamaño de la página `like`, en la posición `at`.
     InsertBlank { at: i32, like: i32 },
-    /// Todas las páginas de otro PDF, a partir de la posición `at`.
-    InsertFile { at: i32, path: String },
+    /// Todas las páginas de otro PDF (por ruta o en base64), a partir de la posición `at`.
+    InsertFile { at: i32, path: Option<String>, data: Option<String> },
 }
 
 /// Abre el PDF, ejecuta `f` y devuelve el PDF guardado.
@@ -99,8 +99,8 @@ pub fn edit_pages(dll: &Path, pdf: &[u8], edit: &PagesEdit) -> Result<Vec<u8>, S
                     }
                     b.FPDF_ClosePage(page);
                 }
-                PagesEdit::InsertFile { at, path } => {
-                    let data = std::fs::read(path).map_err(|e| format!("No se pudo leer el PDF: {e}"))?;
+                PagesEdit::InsertFile { at, path, data } => {
+                    let data = crate::pdf_edit::read_source(path, data, "el PDF")?;
                     let src = b.FPDF_LoadMemDocument64(&data, None);
                     if src.is_null() {
                         return Err("No se pudo abrir el PDF (¿está protegido con contraseña?)".into());
@@ -139,6 +139,29 @@ pub fn extract_pages(dll: &Path, pdf: &[u8], pages: &[i32]) -> Result<Vec<u8>, S
         })();
         b.FPDF_CloseDocument(src);
         result
+    }
+}
+
+/// PDF de una página con el texto «Hola» (para pruebas de otros módulos).
+#[cfg(test)]
+pub(crate) fn tests_sample() -> Vec<u8> {
+    use crate::pdf_engine::wide;
+    let dll = Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/pdfium.dll");
+    let guard = engine(&dll).unwrap().lock().unwrap();
+    let b = &*guard;
+    unsafe {
+        let doc = b.FPDF_CreateNewDocument();
+        let page = b.FPDFPage_New(doc, 0, 595.0, 842.0);
+        let obj = b.FPDFPageObj_NewTextObj(doc, "Helvetica", 12.0);
+        let w = wide(b, "Hola");
+        b.FPDFText_SetText(obj, w.as_ptr() as FPDF_WIDESTRING);
+        b.FPDFPageObj_Transform(obj, 1.0, 0.0, 0.0, 1.0, 72.0, 700.0);
+        b.FPDFPage_InsertObject(page, obj);
+        b.FPDFPage_GenerateContent(page);
+        b.FPDF_ClosePage(page);
+        let out = save(b, doc).unwrap();
+        b.FPDF_CloseDocument(doc);
+        out
     }
 }
 
@@ -216,7 +239,7 @@ mod tests {
         let other = std::env::temp_dir().join("pdfiiuum-insert.pdf");
         std::fs::write(&other, sample(2)).unwrap();
         let merged =
-            edit_pages(&dll(), &pdf, &PagesEdit::InsertFile { at: 4, path: other.to_string_lossy().into() }).unwrap();
+            edit_pages(&dll(), &pdf, &PagesEdit::InsertFile { at: 4, path: Some(other.to_string_lossy().into()), data: None }).unwrap();
         assert_eq!(ids(&merged), [0, 1, 2, 3, 0, 1]);
 
         let extracted = extract_pages(&dll(), &pdf, &[2, 0]).unwrap();

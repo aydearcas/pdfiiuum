@@ -1,6 +1,7 @@
 node_modules
 dist
 public/pdfjs
+browser-extension/viewer
 src-tauri/target
 src-tauri/gen
 *.log

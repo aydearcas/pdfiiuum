@@ -47,9 +47,10 @@ export default function ExtensionDialog({ onClose, notify, copyText }: Props) {
           </button>
         </header>
         <p className="dialog-intro">
-          Añade a Chrome, Edge o Brave el botón <strong>Abrir en pdfiiuum</strong>: el PDF que estés viendo (o el de
-          un enlace) se guarda en Descargas y se abre aquí. Los navegadores no dejan instalarla automáticamente; son
-          tres pasos y solo hay que hacerlos una vez.
+          Con la extensión, los PDF que abras en Chrome, Edge o Brave se ven en pdfiiuum dentro del navegador
+          (con anotaciones, lápiz y edición), y con <strong>Abrir en la app</strong> pasan aquí. Los navegadores no
+          dejan instalarla automáticamente; son tres pasos y solo hay que hacerlos una vez. Al actualizar pdfiiuum,
+          vuelve a cargarla (⟳) en la página de extensiones.
         </p>
         {error && <p className="dialog-error">{error}</p>}
         <ol className="dialog-steps">

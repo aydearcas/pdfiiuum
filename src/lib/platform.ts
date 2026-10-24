@@ -1,13 +1,21 @@
-// Capa de plataforma: usa Tauri (Rust) cuando corre como app de escritorio
-// y un respaldo con APIs del navegador cuando se prueba con `npm run dev`.
+// Capa de plataforma: usa Tauri (Rust) cuando corre como app de escritorio, el puente con la
+// app instalada cuando es el visor de la extensión del navegador, y un respaldo con APIs del
+// navegador cuando se prueba con `npm run dev`.
 import { invoke } from "@tauri-apps/api/core";
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { NativeExisting } from "./annotations";
 import type { PageContent, PageEdit, PagesEdit } from "./edit";
+import { call, toBase64 } from "./bridge";
 
 export const isTauri = "__TAURI_INTERNALS__" in window;
+/** Visor de la extensión del navegador (página chrome-extension://…/viewer.html). */
+export const isExtension = location.protocol === "chrome-extension:";
+/** Anotaciones guardables, modo edición y páginas: hacen falta PDFium (app o puente). */
+export const hasPdfium = isTauri || isExtension;
+/** Guardar escribe en el archivo elegido (y luego en el mismo) en vez de descargar una copia. */
+export const savesInPlace = isTauri || "showSaveFilePicker" in window;
 
 export interface OpenedFile {
   name: string;
@@ -69,6 +77,7 @@ export async function savePdf(
     await invoke("write_pdf", bytes, { headers: { path: encodeURIComponent(target) } });
     return target;
   }
+  if (savesInPlace) return saveWithPicker(bytes, suggestedName, path, forceDialog);
   const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -77,6 +86,36 @@ export async function savePdf(
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 10_000);
   return suggestedName;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type FileHandle = any;
+/** Archivos elegidos con el selector del navegador, por la «ruta» que se da a la pestaña. */
+const fileHandles = new Map<string, FileHandle>();
+let handleSeq = 0;
+
+/** Navegador: el selector «Guardar como» y, las siguientes veces, el mismo archivo. */
+async function saveWithPicker(bytes: Uint8Array, suggestedName: string, path: string | null, forceDialog: boolean) {
+  let handle = path && !forceDialog ? fileHandles.get(path) : undefined;
+  if (!handle) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      handle = await (window as any).showSaveFilePicker({
+        suggestedName,
+        types: [{ description: "Documento PDF", accept: { "application/pdf": [".pdf"] } }],
+      });
+    } catch (e) {
+      if ((e as Error).name === "AbortError") return null;
+      throw e;
+    }
+  }
+  const writable = await handle.createWritable();
+  await writable.write(bytes);
+  await writable.close();
+  // La «ruta» solo sirve para volver a encontrar el archivo; termina en su nombre.
+  const key = path && fileHandles.get(path) === handle ? path : `navegador-${++handleSeq}/${handle.name}`;
+  fileHandles.set(key, handle);
+  return key;
 }
 
 /**
@@ -90,6 +129,11 @@ export async function saveAnnotated(
   path: string | null,
   forceDialog: boolean,
 ): Promise<{ path: string; bytes: Uint8Array } | null> {
+  if (isExtension) {
+    const bytes = await bakeAnnotations(original, changes);
+    const target = await savePdf(bytes, suggestedName, path, forceDialog);
+    return target ? { path: target, bytes } : null;
+  }
   if (!isTauri) throw new Error("Guardar anotaciones solo está disponible en la app de escritorio.");
   const target = await chooseTarget(suggestedName, path, forceDialog);
   if (!target) return null;
@@ -114,6 +158,10 @@ function framed(data: unknown, bin: Uint8Array): Uint8Array {
  * para mostrarla (null si no había ninguna).
  */
 export async function extractAnnotations(pdf: Uint8Array): Promise<{ annots: NativeExisting[]; display: Uint8Array | null }> {
+  if (isExtension) {
+    const r = await call<NativeExisting[]>("extract_annotations", null, pdf);
+    return { annots: r.result, display: r.bytes };
+  }
   const [annots, display] = unframe<NativeExisting[]>(await invoke<ArrayBuffer>("extract_annotations", pdf));
   return { annots, display: display.length ? display : null };
 }
@@ -126,7 +174,8 @@ function unframe<T>(buf: ArrayBuffer): [T, Uint8Array] {
 }
 
 /** Modo edición: tramos de texto e imágenes de una página (desde 1). */
-export function pageContent(pdf: Uint8Array, page: number): Promise<PageContent> {
+export async function pageContent(pdf: Uint8Array, page: number): Promise<PageContent> {
+  if (isExtension) return (await call<PageContent>("page_content", { page: page - 1 }, pdf)).result;
   return invoke<PageContent>("page_content", pdf, { headers: { page: String(page - 1) } });
 }
 
@@ -136,6 +185,10 @@ export async function editPage(
   page: number,
   edit: PageEdit,
 ): Promise<{ bytes: Uint8Array; notice: string | null }> {
+  if (isExtension) {
+    const r = await call<{ notice: string | null }>("edit_page", { page: page - 1, edit }, pdf);
+    return { bytes: r.bytes!, notice: r.result.notice };
+  }
   const [meta, bytes] = unframe<{ notice: string | null }>(
     await invoke<ArrayBuffer>("edit_page", framed({ page: page - 1, edit }, pdf)),
   );
@@ -144,11 +197,13 @@ export async function editPage(
 
 /** Gira, borra, mueve o inserta páginas. Devuelve el PDF resultante. */
 export async function editPages(pdf: Uint8Array, edit: PagesEdit): Promise<Uint8Array> {
+  if (isExtension) return (await call("edit_pages", edit, pdf)).bytes!;
   return new Uint8Array(await invoke<ArrayBuffer>("edit_pages", framed(edit, pdf)));
 }
 
 /** PDF nuevo con esas páginas (desde 1). */
 export async function extractPages(pdf: Uint8Array, pages: number[]): Promise<Uint8Array> {
+  if (isExtension) return (await call("extract_pages", pages.map((p) => p - 1), pdf)).bytes!;
   return new Uint8Array(await invoke<ArrayBuffer>("extract_pages", framed(pages.map((p) => p - 1), pdf)));
 }
 
@@ -157,12 +212,38 @@ export async function bakeAnnotations(
   pdf: Uint8Array,
   changes: { remove: [number, number][]; add: unknown[] },
 ): Promise<Uint8Array> {
+  if (isExtension) return (await call("bake_annotations", changes, pdf)).bytes!;
   return new Uint8Array(await invoke<ArrayBuffer>("bake_annotations", framed(changes, pdf)));
 }
 
-/** Elige un PDF para insertar sus páginas (ruta, o null si se cancela). */
-export async function pickPdfPath(): Promise<string | null> {
-  return open({ multiple: false, directory: false, filters: PDF_FILTER });
+/** Visor del navegador: abre el PDF tal como se ve (guardado en Descargas) en la app instalada. */
+export async function openInApp(pdf: Uint8Array, name: string): Promise<string> {
+  return (await call<{ path: string }>("open_in_app", { name }, pdf)).result.path;
+}
+
+/** Un archivo de entrada para el modo edición: ruta en la app, contenido en el navegador. */
+export type FileSource = { path: string } | { data: string };
+
+/** Navegador: elige un archivo con <input type="file"> y lo devuelve en base64. */
+function pickFile(accept: string): Promise<FileSource | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = accept;
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      resolve(file ? { data: toBase64(new Uint8Array(await file.arrayBuffer())) } : null);
+    };
+    input.oncancel = () => resolve(null);
+    input.click();
+  });
+}
+
+/** Elige un PDF para insertar sus páginas (null si se cancela). */
+export async function pickPdfSource(): Promise<FileSource | null> {
+  if (!isTauri) return pickFile("application/pdf,.pdf");
+  const path = await open({ multiple: false, directory: false, filters: PDF_FILTER });
+  return path ? { path } : null;
 }
 
 /** Extensión del navegador: carpeta para «Cargar descomprimida» y navegadores instalados. */
@@ -184,13 +265,15 @@ export function openBrowserExtensions(id: string): Promise<void> {
   return invoke("open_browser_extensions", { id });
 }
 
-/** Elige una imagen para insertarla en el PDF (ruta, o null si se cancela). */
-export async function pickImage(): Promise<string | null> {
-  return open({
+/** Elige una imagen para insertarla en el PDF (null si se cancela). */
+export async function pickImage(): Promise<FileSource | null> {
+  if (!isTauri) return pickFile("image/png,image/jpeg,image/gif,image/bmp,image/webp");
+  const path = await open({
     multiple: false,
     directory: false,
     filters: [{ name: "Imágenes", extensions: ["png", "jpg", "jpeg", "gif", "bmp", "webp"] }],
   });
+  return path ? { path } : null;
 }
 
 /** Pregunta Sí/No con el diálogo nativo (o confirm() en el navegador). */
@@ -251,7 +334,11 @@ export async function closeWindowNow() {
 let userName: Promise<string> | null = null;
 /** Nombre de usuario de Windows (autor de los comentarios). */
 export function getUserName(): Promise<string> {
-  userName ??= isTauri ? invoke<string>("user_name").catch(() => "") : Promise.resolve("");
+  userName ??= isTauri
+    ? invoke<string>("user_name").catch(() => "")
+    : isExtension
+      ? call<string>("user_name", null).then((r) => r.result).catch(() => "")
+      : Promise.resolve("");
   return userName;
 }
 
@@ -280,6 +367,53 @@ export async function onFileDrop(cb: (paths: string[]) => void): Promise<() => v
   return getCurrentWebviewWindow().onDragDropEvent((e) => {
     if (e.payload.type === "drop") cb(e.payload.paths.filter((p) => /\.pdf$/i.test(p)));
   });
+}
+
+/**
+ * Visor del navegador: el PDF que se estaba abriendo (viewer.html?file=<dirección>). Se descarga
+ * con la sesión del navegador, como haría su propio visor.
+ */
+export async function getStartupDocument(): Promise<OpenedFile | null> {
+  const url = viewedUrl();
+  if (!url) return null;
+  const res = await fetch(url, { credentials: "include" });
+  if (!res.ok) throw new Error(`el servidor respondió ${res.status}`);
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  return { name: nameFromResponse(res, url), path: null, bytes };
+}
+
+/**
+ * Dirección del PDF que muestra el visor: todo lo que sigue a «?file=», sin descodificar (la
+ * regla de la extensión la añade tal cual, con sus propios «&» y «%»).
+ */
+export function viewedUrl(): string | null {
+  if (!isExtension) return null;
+  const i = location.href.indexOf("?file=");
+  return i < 0 ? null : location.href.slice(i + 6) || null;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+declare const chrome: any;
+
+/** Visor del navegador: vuelve a abrir el PDF con el visor propio del navegador. */
+export async function showInBrowserViewer(): Promise<void> {
+  const url = viewedUrl();
+  if (url) await chrome.runtime.sendMessage({ type: "browser-viewer", url });
+}
+
+/** Nombre del archivo: el que indique el servidor o el final de la dirección. */
+function nameFromResponse(res: Response, url: string): string {
+  const cd = res.headers.get("content-disposition") || "";
+  const star = cd.match(/filename\*\s*=\s*[^']*'[^']*'([^;]+)/i);
+  const plain = cd.match(/filename\s*=\s*"?([^";]+)"?/i);
+  let name = "";
+  try {
+    name = star ? decodeURIComponent(star[1]) : plain ? plain[1] : decodeURIComponent(new URL(url).pathname.split("/").pop() ?? "");
+  } catch {
+    name = "";
+  }
+  name = name.trim() || "documento.pdf";
+  return /\.pdf$/i.test(name) ? name : `${name}.pdf`;
 }
 
 export async function setWindowTitle(title: string) {

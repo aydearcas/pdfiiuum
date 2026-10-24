@@ -36,7 +36,10 @@ pdfiiuum es un lector de PDF de escritorio para Windows, ligero y con interfaz o
 
 ### Extensión para Edge, Chrome y Brave
 
-Añade un botón **Abrir en pdfiiuum** (y la misma opción en el menú del botón derecho sobre una página o un enlace) que descarga el PDF con tu sesión del navegador, lo guarda en **Descargas** y lo abre en pdfiiuum. Funciona también con PDF que piden iniciar sesión y con PDF locales (`file://`).
+- **Visor de pdfiiuum en el navegador**: los PDF que abres en Edge, Chrome o Brave se muestran con la interfaz de pdfiiuum (pestañas, miniaturas, anotaciones, lápiz y modo edición). Guardar escribe en el archivo que elijas. Lo que necesita PDFium (leer y guardar anotaciones, editar, organizar páginas) lo hace la app instalada a través de la extensión, así que hace falta tener pdfiiuum instalado.
+  - En la ventana de la extensión se desactiva para volver al visor del navegador; el botón del globo del visor lo hace solo para ese PDF.
+  - Si el servidor pide descargar el PDF, se respeta la descarga.
+- **Abrir en la app de pdfiiuum** (ventana de la extensión, menú del botón derecho sobre una página o un enlace, o el botón del visor): descarga el PDF con tu sesión del navegador, lo guarda en **Descargas** y lo abre en la app. Funciona también con PDF que piden iniciar sesión y con PDF locales (`file://`).
 
 En pdfiiuum, el botón de la pieza de puzle (arriba a la derecha) abre una guía con botones para abrir la página de extensiones de cada navegador instalado y la carpeta de la extensión. Los navegadores no dejan que un programa instale extensiones de fuera de su tienda, así que se carga a mano una vez:
 
@@ -45,7 +48,9 @@ En pdfiiuum, el botón de la pieza de puzle (arriba a la derecha) abre una guía
 3. Pulsa **Cargar desempaquetada** y elige la carpeta `extension` de la instalación.
 4. Para los PDF locales, en los detalles de la extensión activa **Permitir el acceso a las URL de archivo**.
 
-El icono muestra ✓ cuando el PDF se ha abierto y ! si algo ha fallado (al pasar el ratón por encima se ve el motivo).
+Al actualizar pdfiiuum, vuelve a cargar la extensión (botón ⟳ en la página de extensiones) o reinicia el navegador.
+
+Para desarrollar: `npm run build:extension` compila el visor en `browser-extension/viewer/` (también lo hace `npm run build`); después se puede cargar `browser-extension` como extensión desempaquetada.
 
 ## Funciones
 
@@ -100,7 +105,7 @@ Cierra y vuelve a abrir la terminal después de instalar Rust. También hace fal
 - `src-tauri/src/pdf_edit.rs` — modo edición: tramos de texto e imágenes de cada página y sus cambios con PDFium.
 - `src-tauri/src/pdf_pages.rs` — modo edición: girar, borrar, mover, insertar y extraer páginas.
 - `src-tauri/src/native_host.rs` — puente con la extensión: Edge o Chrome arrancan `pdfiiuum.exe chrome-extension://…` y le pasan el PDF por mensajería nativa.
-- `browser-extension/` — extensión «Abrir en pdfiiuum». Su identificador (`ehgjjipbmdcgnpmfclngigpianjmnalh`) sale de la clave pública `key` de `manifest.json` y debe coincidir con `allowed_origins` en `src-tauri/windows/native-messaging-host.json`. La clave privada no está en el repositorio: solo hace falta para publicarla en la Chrome Web Store con el mismo identificador.
+- `browser-extension/` — extensión: visor (`viewer/`, compilado desde `src/` con `vite.extension.config.ts`), redirección de los PDF y «Abrir en pdfiiuum». El visor llama a PDFium a través de `src/lib/bridge.ts` y la sesión de `native_host.rs`. Su identificador (`ehgjjipbmdcgnpmfclngigpianjmnalh`) sale de la clave pública `key` de `manifest.json` y debe coincidir con `allowed_origins` en `src-tauri/windows/native-messaging-host.json`. La clave privada no está en el repositorio: solo hace falta para publicarla en la Chrome Web Store con el mismo identificador.
 
 ## Licencia
 

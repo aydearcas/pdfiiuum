@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import IconButton from "./IconButton";
 import { FONT_SIZES, INK_WIDTHS, paletteFor, type AnnotKind } from "../lib/annotations";
-import { isTauri } from "../lib/platform";
+import { hasPdfium } from "../lib/platform";
 import { EDIT_FONTS } from "../lib/edit";
 import { isEditTool, type EditTool, type Tool, type ToolStyle } from "../lib/tools";
 
@@ -78,7 +78,7 @@ export default function ToolRail({ tool, style, disabled, onTool, onStyle, onIns
       ))}
 
       {/* Modo edición: cambia el contenido del PDF, no son anotaciones. */}
-      {isTauri && (
+      {hasPdfium && (
         <div className="tool-group inverted" aria-label="Edición del PDF">
           {EDIT_TOOLS.map((t) => (
             <IconButton

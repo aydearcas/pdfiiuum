@@ -1,18 +1,19 @@
 {
   "manifest_version": 3,
   "name": "pdfiiuum",
-  "description": "Abre en pdfiiuum el PDF que estás viendo o el de un enlace, para anotarlo y guardarlo.",
-  "version": "0.3.0",
+  "description": "Abre los PDF en el visor de pdfiiuum dentro del navegador (con anotaciones, lápiz y edición) o en la app de escritorio.",
+  "version": "0.4.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAo3iN8AvdYRnEa/+UN/EfXA7pGomPZawntZHImAJ/FsMKg8k19lKD5baf8TRBmhn7ZjwX6GqIKhSfBw3HoArFNkYcRTElk6OBjO5ETwo0N/SYkHSJRlFdpY5NFbYOTpX/Cfj0BElALz2pX2Myz4MdRfh9b447RT9vjX4uf6rloO21qjsgPnt0JZvHJWpyzVe2G8W3dLLNhpBMmKpiEPtdIOY+t6h8QAsZdF+9uCcpGW/FoZms2cQ1YbARdHktcEHQNi3LoQbJH2KyaxQi+j2g02D9+IOmysgz7Ofq6kbiehlrQ670Y/Q6CR+R+aRNLy6Nw3k9kpLyYWmEg7fqIyDHawIDAQAB",
-  "minimum_chrome_version": "116",
-  "permissions": ["nativeMessaging", "contextMenus"],
+  "minimum_chrome_version": "128",
+  "permissions": ["nativeMessaging", "contextMenus", "declarativeNetRequestWithHostAccess", "storage", "tabs"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js",
     "type": "module"
   },
   "action": {
-    "default_title": "Abrir en pdfiiuum",
+    "default_title": "pdfiiuum",
+    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/16.png",
       "32": "icons/32.png",
@@ -24,5 +25,14 @@
     "32": "icons/32.png",
     "48": "icons/48.png",
     "128": "icons/128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["viewer/*"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
   }
 }

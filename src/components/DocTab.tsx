@@ -20,12 +20,13 @@ import {
   editPages,
   extractPages,
   getUserName,
-  isTauri,
+  openInApp,
   pageContent,
   pickImage,
-  pickPdfPath,
+  pickPdfSource,
   saveAnnotated,
   savePdf,
+  savesInPlace,
 } from "../lib/platform";
 
 /** Documento con el que se crea una pestaña. */
@@ -80,6 +81,8 @@ export interface DocTabHandle {
   snapshot(): TabSnapshot;
   /** Modo edición: inserta una imagen en la página actual. */
   insertImage(): Promise<void>;
+  /** Visor del navegador: abre el PDF tal como se ve en la app de escritorio. */
+  openInApp(): Promise<void>;
 }
 
 interface Props {
@@ -247,14 +250,14 @@ export default function DocTab(p: Props) {
         if (!hasChanges) {
           // Sin cambios en anotaciones: el archivo tal cual, con el texto corregido si lo hay
           // (pdf.js muestra una copia sin las anotaciones).
-          const target = await savePdf(d.bytes, d.name, d.path, saveAs || !isTauri);
+          const target = await savePdf(d.bytes, d.name, d.path, saveAs || !savesInPlace);
           if (!target) return;
-          if (isTauri) {
+          if (savesInPlace) {
             diskBytes.current = d.bytes;
             setDoc({ ...d, name: baseName(target), path: target });
             setEdits({ past: [], future: [] });
           }
-          notify(isTauri ? `Guardado: ${baseName(target)}` : "Descarga iniciada");
+          notify(savesInPlace ? `Guardado: ${baseName(target)}` : "Descarga iniciada");
           return;
         }
         const result = await saveAnnotated(d.bytes, { remove, add: add.map(toNative) }, d.name, d.path, saveAs);
@@ -390,13 +393,13 @@ export default function DocTab(p: Props) {
 
   /** Imagen elegida por el usuario, en el centro de la página actual y como mucho al 60 %. */
   const insertImage = useCallback(async () => {
-    const path = await pickImage();
-    if (!path) return;
+    const source = await pickImage();
+    if (!source) return;
     const n = page;
     const [x1, y1, x2, y2] = (await docRef.current.pdf.getPage(n)).view;
     const ok = await applyEdit(n, {
       op: "addImage",
-      path,
+      ...source,
       center: [(x1 + x2) / 2, (y1 + y2) / 2],
       max: [(x2 - x1) * 0.6, (y2 - y1) * 0.6],
     });
@@ -488,8 +491,8 @@ export default function DocTab(p: Props) {
       label: "Insertar otro PDF detrás…",
       icon: FileInput,
       onClick: async () => {
-        const path = await pickPdfPath();
-        if (path) pagesOp({ op: "insertFile", at: after, path }, (count) => range(after + 1, count - pageCount));
+        const source = await pickPdfSource();
+        if (source) pagesOp({ op: "insertFile", at: after, ...source }, (count) => range(after + 1, count - pageCount));
       },
     },
     {
@@ -555,6 +558,18 @@ export default function DocTab(p: Props) {
         edited: docRef.current.bytes !== diskBytes.current,
       }),
       insertImage,
+      openInApp: async () => {
+        try {
+          const d = docRef.current;
+          const { remove, add, dirty: pending } = changesRef.current;
+          // Con las anotaciones sin guardar escritas, para que la app muestre lo mismo.
+          const bytes = pending ? await bakeAnnotations(d.bytes, { remove, add: add.map(toNative) }) : d.bytes;
+          const path = await openInApp(bytes, d.name);
+          notify(`Abierto en pdfiiuum (guardado en ${baseName(path)})`);
+        } catch (e) {
+          notify(`No se pudo abrir en la app: ${e instanceof Error ? e.message : e}`, true);
+        }
+      },
     }),
     [save, history.undo, history.redo, selectedId, onDelete, clearSelection, editMode, undoEdit, insertImage, tool, deletePages],
   );

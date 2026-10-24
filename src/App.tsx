@@ -14,6 +14,9 @@ import {
   getStartupFile,
   guardClose,
   isTauri,
+  hasPdfium,
+  getStartupDocument,
+  showInBrowserViewer,
   onFileDrop,
   onOpenFiles,
   pickPdf,
@@ -43,7 +46,7 @@ const TOOL_KEYS: Record<string, Tool> = {
   t: "text",
   d: "ink",
   // Modo edición: solo en la app de escritorio (necesita PDFium).
-  ...(isTauri ? { e: "edittext" as const } : {}),
+  ...(hasPdfium ? { e: "edittext" as const } : {}),
 };
 
 const COMMENTS_PREF = "pdfiiuum.commentsOpen";
@@ -251,6 +254,11 @@ export default function App() {
       else {
         const p = await getStartupFile();
         if (p) await openPath(p);
+        // Visor del navegador: el PDF de la pestaña.
+        await getStartupDocument().then(
+          (doc) => doc && openFile(doc),
+          (e) => notify(`No se pudo abrir el PDF: ${e instanceof Error ? e.message : e}`, true),
+        );
       }
     })();
     // Los listeners se registran de forma asíncrona: si el efecto se limpia antes de que
@@ -419,6 +427,8 @@ export default function App() {
         onRotate={() => active?.rotate()}
         onSearch={() => active?.toggleSearch()}
         onBrowserExtension={() => setExtensionOpen(true)}
+        onOpenInApp={() => active?.openInApp()}
+        onBrowserViewer={() => showInBrowserViewer()}
       />
       {extensionOpen && <ExtensionDialog onClose={closeExtension} notify={notify} copyText={copyText} />}
       <div className="body">
@@ -456,7 +466,7 @@ export default function App() {
           ))}
           {tabs.length === 0 && (
             <div className="empty">
-              <img src="/icon.png" alt="" className="empty-logo" />
+              <img src={`${import.meta.env.BASE_URL}icon.png`} alt="" className="empty-logo" />
               <h1>{APP_NAME}</h1>
               <p>Abre un documento para empezar</p>
               <button className="primary" onClick={handleOpen}>
