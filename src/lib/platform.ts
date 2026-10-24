@@ -12,6 +12,12 @@ import { call, toBase64 } from "./bridge";
 export const isTauri = "__TAURI_INTERNALS__" in window;
 /** Visor de la extensión del navegador (página chrome-extension://…/viewer.html). */
 export const isExtension = location.protocol === "chrome-extension:";
+/**
+ * Visor dentro de un iframe de otra página. Cualquier web puede incrustar el visor de la
+ * extensión con el PDF que quiera; abrirlo ahí mandaría ese PDF al PDFium de la app sin
+ * que el usuario haga nada, así que en ese caso no se carga.
+ */
+export const isEmbedded = !isTauri && window.self !== window.top;
 /** Anotaciones guardables, modo edición y páginas: hacen falta PDFium (app o puente). */
 export const hasPdfium = isTauri || isExtension;
 /** Guardar escribe en el archivo elegido (y luego en el mismo) en vez de descargar una copia. */

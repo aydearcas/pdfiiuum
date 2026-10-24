@@ -8,13 +8,24 @@ export interface OpenedDocument {
   pdf: PDFDocument;
   /** Anotaciones guardadas en el PDF, ya editables. */
   baseline: Annot[];
+  /**
+   * Las anotaciones del PDF aún no se han leído con PDFium: pdf.js las dibuja tal cual, sin
+   * poder editarlas, hasta que el usuario empieza a anotar, editar o guardar.
+   */
+  deferred: boolean;
 }
 
-export async function openDocument(bytes: Uint8Array): Promise<OpenedDocument> {
-  const extracted = hasPdfium ? await extractAnnotations(bytes).catch(() => null) : null;
+/**
+ * Con `defer` (visor del navegador) no se usa PDFium al abrir: el PDF puede venir de cualquier
+ * web, y PDFium corre en la app instalada, fuera del sandbox del navegador. Solo se le manda
+ * cuando el usuario hace algo que lo necesita.
+ */
+export async function openDocument(bytes: Uint8Array, { defer = false } = {}): Promise<OpenedDocument> {
+  const deferred = hasPdfium && defer;
+  const extracted = hasPdfium && !defer ? await extractAnnotations(bytes).catch(() => null) : null;
   const pdf = await loadPdf(extracted?.display ?? bytes);
   const baseline = extracted ? await withQuotes(pdf, extracted.annots.map(fromNative)) : [];
-  return { pdf, baseline };
+  return { pdf, baseline, deferred };
 }
 
 interface TextItem {

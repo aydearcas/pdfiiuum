@@ -250,12 +250,15 @@ export default function AnnotationLayer(p: Props) {
         <AnnotCard
           annot={selected}
           getAnchor={() => {
-            const r = rootRef.current!.getBoundingClientRect();
+            // Si la capa se monta ya con una anotación seleccionada (al cambiar el PDF), la tarjeta
+            // se coloca antes de que exista la raíz: queda oculta hasta el siguiente render.
+            if (!rootRef.current) return new DOMRect();
+            const r = rootRef.current.getBoundingClientRect();
             const b = toBox(bounds(selected));
             return new DOMRect(r.left + b.left, r.top + b.top, b.width, b.height);
           }}
           getBounds={() =>
-            (rootRef.current!.closest(".viewer-container") ?? document.body).getBoundingClientRect()
+            (rootRef.current?.closest(".viewer-container") ?? document.body).getBoundingClientRect()
           }
           autoFocus={selected.id === p.editingId}
           onBegin={p.onBegin}

@@ -39,6 +39,8 @@ export interface TabInit {
   path: string | null;
   /** Anotaciones que ya tiene el PDF en disco (editables). */
   baseline: Annot[];
+  /** Visor del navegador: las anotaciones del PDF aún no se han leído con PDFium (ver `openDocument`). */
+  deferred?: boolean;
   /** Estado de las anotaciones traído de otra ventana (incluye cambios sin guardar). */
   annots?: Annot[];
   view?: ViewState;
@@ -151,9 +153,10 @@ export default function DocTab(p: Props) {
   const [author, setAuthor] = useState("");
   const docRef = useRef(doc);
 
+  // En el visor del navegador, preguntar el nombre ya arranca la app: se espera a que haga falta.
   useEffect(() => {
-    getUserName().then(setAuthor);
-  }, []);
+    if (!doc.deferred) getUserName().then(setAuthor);
+  }, [doc.deferred]);
 
   // Marcadores: la primera vez se abre la vista de marcadores si el PDF tiene índice.
   const [outline, setOutline] = useState<OutlineNode[]>([]);
@@ -180,6 +183,51 @@ export default function DocTab(p: Props) {
   annotsRef.current = annots;
   const changesRef = useRef(changes);
   changesRef.current = changes;
+
+  // Visor del navegador: las anotaciones del PDF se leen con PDFium la primera vez que hacen
+  // falta (anotar, editar, organizar páginas, guardar), no al abrirlo. Hasta entonces pdf.js las
+  // dibuja tal cual; al leerlas pasan a la capa editable junto a las que ya se hayan creado.
+  const editable = useRef<Promise<void> | null>(null);
+  const [loadingExisting, setLoadingExisting] = useState(false);
+  const ensureEditable = useCallback(() => {
+    if (!docRef.current.deferred) return Promise.resolve();
+    editable.current ??= (async () => {
+      setLoadingExisting(true);
+      try {
+        const d = docRef.current;
+        const view = viewer.current?.viewState();
+        const reopened = await openDocument(d.bytes);
+        const merged = [...reopened.baseline, ...annotsRef.current];
+        // Las refs se actualizan ya: quien espera a esta promesa ve el PDF editable sin esperar al render.
+        docRef.current = { ...d, ...reopened, view };
+        annotsRef.current = merged;
+        setDoc(docRef.current);
+        history.reset(merged);
+      } catch (e) {
+        editable.current = null;
+        throw e;
+      } finally {
+        setLoadingExisting(false);
+      }
+    })();
+    return editable.current;
+  }, [history.reset]);
+
+  /** Lee las anotaciones del PDF si aún no se han leído; false si no se ha podido. */
+  const loadExisting = useCallback(async () => {
+    try {
+      await ensureEditable();
+      return true;
+    } catch (e) {
+      notify(`No se pudieron leer las anotaciones del PDF: ${e instanceof Error ? e.message : e}`, true);
+      return false;
+    }
+  }, [ensureEditable, notify]);
+
+  // Elegir una herramienta o crear una anotación es empezar a anotar o editar.
+  useEffect(() => {
+    if (doc.deferred && (annots.length > 0 || (active && tool !== "select" && tool !== "hand"))) loadExisting();
+  }, [doc.deferred, annots.length, active, tool, loadExisting]);
 
   // Al cambiar de PDF (guardar, corregir texto, deshacer) se libera el anterior cuando
   // el visor y las miniaturas ya muestran el nuevo.
@@ -242,14 +290,16 @@ export default function DocTab(p: Props) {
 
   const save = useCallback(
     async (saveAs: boolean) => {
-      const d = docRef.current;
       if (saving) return;
       // Cierra cualquier editor de texto abierto para que su contenido entre en el guardado.
       (document.activeElement as HTMLElement | null)?.blur();
       await new Promise((r) => setTimeout(r, 0));
-      const { remove, add, dirty: hasChanges } = changesRef.current;
       setSaving(true);
       try {
+        // Visor del navegador: si hay que leer las anotaciones del PDF (o se están leyendo), antes.
+        await (changesRef.current.dirty ? ensureEditable() : editable.current);
+        const d = docRef.current;
+        const { remove, add, dirty: hasChanges } = changesRef.current;
         if (!hasChanges) {
           // Sin cambios en anotaciones: el archivo tal cual, con el texto corregido si lo hay
           // (pdf.js muestra una copia sin las anotaciones).
@@ -281,12 +331,15 @@ export default function DocTab(p: Props) {
         setSaving(false);
       }
     },
-    [notify, saving, history.reset, clearSelection],
+    [notify, saving, history.reset, clearSelection, ensureEditable],
   );
 
-  // Crear resaltados/subrayados/tachados a partir de la selección de texto.
+  // Crear resaltados/subrayados/tachados a partir de la selección de texto. Si aún no se han
+  // leído las anotaciones del PDF, primero: al leerlas cambia el PDF que se muestra, y eso no
+  // puede pasar con la tarjeta de la anotación nueva abierta.
   const createMarkup = useCallback(
-    (kind: MarkupKind, sel: TextSelection, opts: { color?: string; withComment?: boolean } = {}) => {
+    async (kind: MarkupKind, sel: TextSelection, opts: { color?: string; withComment?: boolean } = {}) => {
+      if (docRef.current.deferred && !(await loadExisting())) return;
       const { color = toolStyle.colors[kind], withComment = false } = opts;
       // El color elegido pasa a ser el predeterminado de esa herramienta.
       if (color !== toolStyle.colors[kind]) setToolStyle((s) => ({ ...s, colors: { ...s.colors, [kind]: color } }));
@@ -310,11 +363,12 @@ export default function DocTab(p: Props) {
         setEditingId(created[0].id);
       }
     },
-    [history.add, toolStyle, setToolStyle, author],
+    [history.add, toolStyle, setToolStyle, author, loadExisting],
   );
 
   const onCreate = useCallback(
-    (created: Annot) => {
+    async (created: Annot) => {
+      if (docRef.current.deferred && !(await loadExisting())) return;
       const a = { ...created, author };
       history.add(a);
       if (a.kind === "note") {
@@ -326,7 +380,7 @@ export default function DocTab(p: Props) {
         setTool("select");
       }
     },
-    [history.add, setTool, author],
+    [history.add, setTool, author, loadExisting],
   );
 
   const onDelete = useCallback(
@@ -377,8 +431,9 @@ export default function DocTab(p: Props) {
     async (n: number, change: PageEdit) => {
       if (editBusy.current) return false;
       editBusy.current = true;
-      const before = docRef.current.bytes;
       try {
+        await ensureEditable();
+        const before = docRef.current.bytes;
         const result = await editPage(before, n, change);
         await showBytes(result.bytes);
         setEdits((s) => ({ past: [...s.past, { bytes: before, pages: false }].slice(-50), future: [] }));
@@ -391,7 +446,7 @@ export default function DocTab(p: Props) {
         editBusy.current = false;
       }
     },
-    [showBytes, notify],
+    [showBytes, notify, ensureEditable],
   );
 
   /** Imagen elegida por el usuario, en el centro de la página actual y como mucho al 60 %. */
@@ -448,6 +503,7 @@ export default function DocTab(p: Props) {
       if (editBusy.current) return;
       editBusy.current = true;
       try {
+        await ensureEditable();
         const d = docRef.current;
         const { remove, add, dirty: pending } = changesRef.current;
         const base = pending ? await bakeAnnotations(d.bytes, { remove, add: add.map(toNative) }) : d.bytes;
@@ -460,7 +516,7 @@ export default function DocTab(p: Props) {
         editBusy.current = false;
       }
     },
-    [showBytes, notify],
+    [showBytes, notify, ensureEditable],
   );
 
   const pageCount = doc.pdf.numPages;
@@ -703,10 +759,11 @@ export default function DocTab(p: Props) {
       <CommentsPanel
         open={p.commentsOpen}
         items={panelItems}
-        loading={false}
+        loading={loadingExisting}
         selectedKey={selectedId}
         onToggle={p.onToggleComments}
         onPick={pickItem}
+        onLoadExisting={doc.deferred ? loadExisting : undefined}
       />
       {active && textSel && tool === "select" && (
         <SelectionMenu

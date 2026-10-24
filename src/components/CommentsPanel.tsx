@@ -22,6 +22,8 @@ interface Props {
   selectedKey: string | null;
   onToggle(): void;
   onPick(item: PanelItem): void;
+  /** Visor del navegador: las anotaciones del PDF aún no se han leído; las lee al pulsarlo. */
+  onLoadExisting?(): void;
 }
 
 const ICONS: Partial<Record<AnnotKind, typeof Highlighter>> = {
@@ -36,7 +38,7 @@ export function sortItems(items: PanelItem[]): PanelItem[] {
   return [...items].sort((a, b) => a.page - b.page || b.rect[3] - a.rect[3] || a.rect[0] - b.rect[0]);
 }
 
-export default function CommentsPanel({ open, items, loading, selectedKey, onToggle, onPick }: Props) {
+export default function CommentsPanel({ open, items, loading, selectedKey, onToggle, onPick, onLoadExisting }: Props) {
   if (!open) {
     return (
       <aside className="comments-panel collapsed">
@@ -61,11 +63,19 @@ export default function CommentsPanel({ open, items, loading, selectedKey, onTog
         </button>
       </header>
       <div className="comments-list">
-        {items.length === 0 && (
-          <p className="comments-empty">
-            {loading ? "Buscando comentarios…" : "No hay comentarios ni resaltados en este documento."}
-          </p>
-        )}
+        {items.length === 0 &&
+          (onLoadExisting && !loading ? (
+            <div className="comments-empty">
+              <p>Los comentarios que ya tiene el PDF se cargan al empezar a anotar o editar.</p>
+              <button className="comments-load" onClick={onLoadExisting}>
+                Cargarlos ahora
+              </button>
+            </div>
+          ) : (
+            <p className="comments-empty">
+              {loading ? "Buscando comentarios…" : "No hay comentarios ni resaltados en este documento."}
+            </p>
+          ))}
         {items.map((it) => {
           const Icon = ICONS[it.kind] ?? MessageSquareText;
           const pageHeader = it.page !== lastPage ? <h4 className="comments-page">Página {it.page}</h4> : null;
