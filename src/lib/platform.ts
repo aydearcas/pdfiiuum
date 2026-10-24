@@ -7,7 +7,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { NativeExisting } from "./annotations";
 import type { PageContent, PageEdit, PagesEdit } from "./edit";
-import { call, toBase64 } from "./bridge";
+import { call, concat, toBase64 } from "./bridge";
 
 export const isTauri = "__TAURI_INTERNALS__" in window;
 /** Visor de la extensión del navegador (página chrome-extension://…/viewer.html). */
@@ -418,8 +418,32 @@ export async function getStartupDocument(): Promise<OpenedFile | null> {
   if (!url) return null;
   const res = await fetch(url, { credentials: "include" });
   if (!res.ok) throw new Error(`el servidor respondió ${res.status}`);
-  const bytes = new Uint8Array(await res.arrayBuffer());
+  const bytes = await readLimited(res, MAX_PDF);
   return { name: nameFromResponse(res, url), path: null, bytes };
+}
+
+/** Tope del PDF del visor del navegador (el mismo que «Abrir en pdfiiuum»). */
+const MAX_PDF = 1024 * 1024 * 1024;
+
+/** Lee la respuesta sin pasar de `max` bytes: una respuesta enorme llenaría la memoria de la pestaña. */
+export async function readLimited(res: Response, max: number): Promise<Uint8Array> {
+  const mb = max / 1024 / 1024;
+  const tooBig = () => new Error(`el PDF pesa más de ${mb >= 1024 ? `${mb / 1024} GB` : `${Math.round(mb)} MB`}`);
+  if (Number(res.headers.get("content-length")) > max) throw tooBig();
+  if (!res.body) return new Uint8Array(await res.arrayBuffer());
+  const reader = res.body.getReader();
+  const parts: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) return concat(parts);
+    total += value.length;
+    if (total > max) {
+      await reader.cancel();
+      throw tooBig();
+    }
+    parts.push(value);
+  }
 }
 
 /**

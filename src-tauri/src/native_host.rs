@@ -53,6 +53,17 @@ enum Message {
 /// Trozo de PDF por mensaje hacia la extensión: en base64 queda por debajo de 1 MB.
 const PART: usize = 700_000;
 
+const TOO_BIG: &str = "El PDF es demasiado grande";
+
+/// Añade al PDF que se está recibiendo un trozo en base64, sin pasar de `max` bytes.
+fn append_part(buf: &mut Vec<u8>, data: &str, max: usize) -> Result<(), String> {
+    base64::engine::general_purpose::STANDARD.decode_vec(data.as_bytes(), buf).map_err(|e| e.to_string())?;
+    if buf.len() > max {
+        return Err(TOO_BIG.into());
+    }
+    Ok(())
+}
+
 /// ¿Nos ha arrancado el navegador como puente de la extensión?
 pub fn is_native_host() -> bool {
     std::env::args().skip(1).any(|a| a.starts_with("chrome-extension://"))
@@ -107,15 +118,23 @@ fn session(first: Message, input: &mut impl Read, output: &mut impl Write, dll: 
             },
         };
         let sent = match message {
+            Message::Put { size } if size > MAX_PDF => {
+                incoming = None;
+                send(output, &json!({ "type": "error", "id": null, "error": TOO_BIG })).map_err(|e| e.to_string())
+            }
             Message::Put { size } => {
-                incoming = Some(Vec::with_capacity(size.min(MAX_PDF)));
+                incoming = Some(Vec::with_capacity(size));
                 Ok(())
             }
             Message::Part { data } => match incoming.as_mut() {
-                Some(buf) => b64.decode_vec(data.as_bytes(), buf).map(|_| ()).map_err(|e| e.to_string()),
+                Some(buf) => append_part(buf, &data, MAX_PDF),
                 None => Err("Trozo sin cabecera".to_string()),
             }
-            .or_else(|e| send(output, &json!({ "type": "error", "id": null, "error": e })).map_err(|e| e.to_string())),
+            .or_else(|e| {
+                // Un PDF que no cabe se descarta entero, en vez de seguir acumulando memoria.
+                incoming = None;
+                send(output, &json!({ "type": "error", "id": null, "error": e })).map_err(|e| e.to_string())
+            }),
             Message::Call { id, cmd, args } => {
                 if let Some(buf) = incoming.take() {
                     current = buf;
@@ -486,6 +505,27 @@ mod tests {
         assert_eq!(call(&dll, &pdf, "edit_page", image).unwrap_err(), NO_PATHS);
         let insert = json!({ "op": "insertFile", "at": 0, "path": r"C:\Docs\otro.pdf" });
         assert_eq!(call(&dll, &pdf, "edit_pages", insert).unwrap_err(), NO_PATHS);
+    }
+
+    #[test]
+    fn oversized_pdfs_are_refused() {
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let mut buf = Vec::new();
+        assert!(append_part(&mut buf, &b64.encode(b"123"), 4).is_ok());
+        assert_eq!(append_part(&mut buf, &b64.encode(b"45"), 4).unwrap_err(), TOO_BIG);
+
+        // Una sesión que anuncia más de MAX_PDF recibe un error (sin reservar esa memoria) y sigue atendiendo.
+        let dll = Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/pdfium.dll");
+        let mut input = Vec::new();
+        input.extend(frame(json!({ "type": "put", "size": MAX_PDF + 1 })));
+        input.extend(frame(json!({ "type": "call", "id": 1, "cmd": "user_name" })));
+        let mut reader = input.as_slice();
+        let first = read_message(&mut reader).unwrap().unwrap();
+        let mut out = Vec::new();
+        session(first, &mut reader, &mut out, &dll);
+        let r = replies(&out);
+        assert_eq!(r[0]["error"], TOO_BIG);
+        assert_eq!(r[1]["type"], "result");
     }
 
     #[test]
