@@ -6,13 +6,15 @@ interface Props {
   active?: boolean;
   disabled?: boolean;
   badge?: string;
+  /** Acción principal: fondo rojo e icono blanco. */
+  primary?: boolean;
   onClick?(): void;
 }
 
-export default function IconButton({ icon: Icon, label, active, disabled, badge, onClick }: Props) {
+export default function IconButton({ icon: Icon, label, active, disabled, badge, primary, onClick }: Props) {
   return (
     <button
-      className={`icon-btn${active ? " active" : ""}`}
+      className={`icon-btn${active ? " active" : ""}${primary ? " filled" : ""}`}
       disabled={disabled}
       onClick={onClick}
       aria-label={label}

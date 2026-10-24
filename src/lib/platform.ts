@@ -216,6 +216,16 @@ export async function bakeAnnotations(
   return new Uint8Array(await invoke<ArrayBuffer>("bake_annotations", framed(changes, pdf)));
 }
 
+/** Navegador: descarga el PDF a la carpeta de descargas, como el botón del visor del navegador. */
+export function downloadPdf(bytes: Uint8Array, name: string) {
+  const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/pdf" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
+
 /** Visor del navegador: abre el PDF tal como se ve (guardado en Descargas) en la app instalada. */
 export async function openInApp(pdf: Uint8Array, name: string): Promise<string> {
   return (await call<{ path: string }>("open_in_app", { name }, pdf)).result.path;

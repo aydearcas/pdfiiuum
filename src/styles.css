@@ -335,6 +335,14 @@ button {
 .topbar .icon-btn.active {
   background: var(--hover);
 }
+.icon-btn.filled,
+.icon-btn.filled:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+.icon-btn.filled:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
 .icon-btn:disabled {
   opacity: 0.35;
   cursor: default;

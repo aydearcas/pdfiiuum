@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import {
   AppWindow,
   ChevronDown,
+  Download,
   FolderOpen,
   Globe,
   Maximize,
@@ -46,6 +47,7 @@ interface Props {
   onBrowserExtension(): void;
   onOpenInApp(): void;
   onBrowserViewer(): void;
+  onDownload(): void;
 }
 
 const PRESETS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
@@ -190,6 +192,7 @@ export default function TopBar(p: Props) {
         )}
         {isExtension && (
           <>
+            <IconButton icon={Download} label="Descargar" primary disabled={!p.hasDoc} onClick={p.onDownload} />
             <IconButton icon={Globe} label="Ver con el visor del navegador" onClick={p.onBrowserViewer} />
             <IconButton icon={AppWindow} label="Abrir en la app de pdfiiuum" disabled={!p.hasDoc} onClick={p.onOpenInApp} />
           </>

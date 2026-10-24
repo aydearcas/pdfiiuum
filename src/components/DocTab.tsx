@@ -16,6 +16,7 @@ import { useAnnotations } from "../lib/useAnnotations";
 import {
   bakeAnnotations,
   baseName,
+  downloadPdf,
   editPage,
   editPages,
   extractPages,
@@ -83,6 +84,8 @@ export interface DocTabHandle {
   insertImage(): Promise<void>;
   /** Visor del navegador: abre el PDF tal como se ve en la app de escritorio. */
   openInApp(): Promise<void>;
+  /** Visor del navegador: descarga el PDF tal como se ve (con las anotaciones sin guardar). */
+  download(): Promise<void>;
 }
 
 interface Props {
@@ -558,6 +561,15 @@ export default function DocTab(p: Props) {
         edited: docRef.current.bytes !== diskBytes.current,
       }),
       insertImage,
+      download: async () => {
+        try {
+          const d = docRef.current;
+          const { remove, add, dirty: pending } = changesRef.current;
+          downloadPdf(pending ? await bakeAnnotations(d.bytes, { remove, add: add.map(toNative) }) : d.bytes, d.name);
+        } catch (e) {
+          notify(`No se pudo descargar: ${e instanceof Error ? e.message : e}`, true);
+        }
+      },
       openInApp: async () => {
         try {
           const d = docRef.current;

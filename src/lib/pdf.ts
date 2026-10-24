@@ -5,7 +5,9 @@ pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 // pdf_viewer.mjs lee la librería desde esta global al cargarse.
 (globalThis as { pdfjsLib?: unknown }).pdfjsLib = pdfjs;
 
-const ASSETS = `${import.meta.env.BASE_URL}pdfjs/`;
+// Dirección completa: el worker de pdf.js carga el wasm por su cuenta y resolvería una ruta
+// relativa desde su propia carpeta (assets/), no desde la página (visor de la extensión).
+const ASSETS = new URL(`${import.meta.env.BASE_URL}pdfjs/`, location.href).href;
 
 /** Iconos que usa pdf.js para las notas ya guardadas en el PDF. */
 export const IMAGE_RESOURCES = `${ASSETS}images/`;

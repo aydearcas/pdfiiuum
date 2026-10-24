@@ -429,6 +429,7 @@ export default function App() {
         onBrowserExtension={() => setExtensionOpen(true)}
         onOpenInApp={() => active?.openInApp()}
         onBrowserViewer={() => showInBrowserViewer()}
+        onDownload={() => active?.download()}
       />
       {extensionOpen && <ExtensionDialog onClose={closeExtension} notify={notify} copyText={copyText} />}
       <div className="body">
