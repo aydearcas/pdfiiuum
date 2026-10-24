@@ -184,11 +184,17 @@ fn call(dll: &Path, current: &[u8], cmd: &str, args: Value) -> Result<(Value, Op
         }
         "edit_page" => {
             let EditPage { page, edit } = arg(args)?;
+            if matches!(edit, pdf_edit::PageEdit::AddImage { path: Some(_), .. }) {
+                return Err(NO_PATHS.into());
+            }
             let out = pdf_edit::edit_page(dll, current, page, &edit)?;
             Ok((json!({ "notice": out.notice }), Some(out.pdf), true))
         }
         "edit_pages" => {
             let edit: pdf_pages::PagesEdit = arg(args)?;
+            if matches!(edit, pdf_pages::PagesEdit::InsertFile { path: Some(_), .. }) {
+                return Err(NO_PATHS.into());
+            }
             Ok((Value::Null, Some(pdf_pages::edit_pages(dll, current, &edit)?), true))
         }
         "extract_pages" => {
@@ -245,7 +251,7 @@ fn receive(first: Message, input: &mut impl Read) -> Result<PathBuf, String> {
         match message {
             None => return Err("La extensión cerró la conexión antes de terminar".into()),
             Some(Message::Path { path }) => {
-                let p = PathBuf::from(path);
+                let p = local_pdf(&path)?;
                 return if p.is_file() { Ok(p) } else { Err(format!("No existe {}", p.display())) };
             }
             Some(Message::Begin { name, size }) => {
@@ -273,6 +279,24 @@ fn receive(first: Message, input: &mut impl Read) -> Result<PathBuf, String> {
         }
     }
 }
+
+/// Lo único que el navegador puede pedir abrir por ruta: un PDF en una unidad del equipo. Con una
+/// ruta de red (\\servidor\…), solo comprobar si existe haría que Windows se conectara a ese
+/// servidor y le enviara las credenciales del usuario.
+fn local_pdf(path: &str) -> Result<PathBuf, String> {
+    let b = path.as_bytes();
+    let drive = b.len() > 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'\\' | b'/');
+    if !drive {
+        return Err(format!("Solo se abren PDF de este equipo: {path}"));
+    }
+    let p = PathBuf::from(path);
+    crate::check_path(&p, crate::PDF)?;
+    Ok(p)
+}
+
+/// En la sesión del visor del navegador los archivos que se insertan llegan como datos: una ruta
+/// local no tiene sentido ahí y permitiría leer cualquier archivo del equipo.
+const NO_PATHS: &str = "En el visor del navegador los archivos se envían como datos, no por ruta";
 
 /// Nombre de archivo válido en Windows y terminado en .pdf.
 fn safe_name(name: &str) -> String {
@@ -440,6 +464,28 @@ mod tests {
         // El visor del navegador recibe las anotaciones y si el PDF está firmado.
         assert!(result(5)["result"]["annots"].is_array());
         assert_eq!(result(5)["result"]["signed"], false);
+    }
+
+    #[test]
+    fn browser_paths_stay_local() {
+        // Se rechazan antes de tocar el disco: ni siquiera se comprueba si existen.
+        for bad in [r"\\servidor\compartida\x.pdf", r"\\?\C:\x.pdf", r"C:\Windows\win.ini", "x.pdf", r"C:\x.bat:oculto.pdf"] {
+            let mut nothing: &[u8] = &[];
+            let err = receive(Message::Path { path: bad.into() }, &mut nothing).unwrap_err();
+            assert!(!err.starts_with("No existe"), "{bad}: {err}");
+        }
+        assert!(local_pdf(r"C:\Docs\informe.pdf").is_ok());
+        assert!(local_pdf("D:/Docs/acta de la reunión.PDF").is_ok());
+    }
+
+    #[test]
+    fn viewer_session_takes_no_paths() {
+        let dll = Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/pdfium.dll");
+        let pdf = pdf_pages::tests_sample();
+        let image = json!({ "page": 0, "edit": { "op": "addImage", "path": r"C:\Windows\win.ini", "center": [0, 0], "max": [10, 10] } });
+        assert_eq!(call(&dll, &pdf, "edit_page", image).unwrap_err(), NO_PATHS);
+        let insert = json!({ "op": "insertFile", "at": 0, "path": r"C:\Docs\otro.pdf" });
+        assert_eq!(call(&dll, &pdf, "edit_pages", insert).unwrap_err(), NO_PATHS);
     }
 
     #[test]

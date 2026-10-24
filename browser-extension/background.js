@@ -206,11 +206,14 @@ function fileName(res, url) {
   return name.trim() || "documento.pdf";
 }
 
-/** file:///C:/Docs/a%20b.pdf → C:\Docs\a b.pdf (y file://servidor/… → \\servidor\…). */
+/**
+ * file:///C:/Docs/a%20b.pdf → C:\Docs\a b.pdf. No admite file://servidor/…: con solo comprobar
+ * si existe, Windows se conectaría a ese servidor y le enviaría las credenciales del usuario.
+ */
 function fileUrlToPath(url) {
   const u = new URL(url);
-  const path = decodeURIComponent(u.pathname).replace(/\//g, "\\");
-  return u.host ? `\\\\${u.host}${path}` : path.replace(/^\\/, "");
+  if (u.host) throw new Error("solo se abren PDF de este equipo, no de otros equipos de la red");
+  return decodeURIComponent(u.pathname).replace(/\//g, "\\").replace(/^\\/, "");
 }
 
 function toBase64(bytes) {
