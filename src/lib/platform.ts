@@ -292,6 +292,25 @@ export async function pickImage(): Promise<FileSource | null> {
   return path ? { path } : null;
 }
 
+/**
+ * Enlace externo de un PDF (web o correo). En escritorio se abre con el navegador o el programa
+ * del sistema después de que el usuario lo confirme, porque el enlace lo ha puesto quien hizo
+ * el PDF; en el navegador, en una pestaña nueva.
+ */
+export async function openExternal(url: string): Promise<void> {
+  if (!isTauri) {
+    window.open(url, "_blank", "noopener");
+    return;
+  }
+  const ok = await ask(`¿Abrir este enlace fuera de pdfiiuum?\n\n${url}`, {
+    title: "pdfiiuum",
+    kind: "info",
+    okLabel: "Abrir",
+    cancelLabel: "Cancelar",
+  });
+  if (ok) await invoke("open_external", { url });
+}
+
 /** Pregunta Sí/No con el diálogo nativo (o confirm() en el navegador). */
 export async function confirmDiscard(message: string): Promise<boolean> {
   if (!isTauri) return window.confirm(message);

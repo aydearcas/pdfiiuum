@@ -33,6 +33,64 @@ pub(crate) fn check_path(path: &Path, allowed: &[&str]) -> Result<(), String> {
     Err(format!("Solo se admiten archivos {}: {}", list.join(", "), path.display()))
 }
 
+/// Direcciones de la propia app: la ventana no puede salir de ellas, para que un enlace del PDF
+/// no sustituya la interfaz por una web (y se pierda lo no guardado).
+fn is_app_url(url: &tauri::Url) -> bool {
+    match url.scheme() {
+        "tauri" => true,
+        "http" | "https" => {
+            url.host_str() == Some("tauri.localhost") || (cfg!(debug_assertions) && url.host_str() == Some("localhost"))
+        }
+        _ => url.as_str() == "about:blank",
+    }
+}
+
+/// Webs y correo: lo único que la app abre fuera (con el navegador o el programa de correo).
+fn external_url(url: &str) -> Result<tauri::Url, String> {
+    let parsed = tauri::Url::parse(url).map_err(|_| format!("Enlace no válido: {url}"))?;
+    match parsed.scheme() {
+        "http" | "https" | "mailto" => Ok(parsed),
+        other => Err(format!("pdfiiuum no abre enlaces «{other}:»")),
+    }
+}
+
+/// Abre un enlace del PDF que el usuario ha confirmado.
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    shell_open(external_url(&url)?.as_str())
+}
+
+#[cfg(windows)]
+fn shell_open(target: &str) -> Result<(), String> {
+    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let (verb, target) = (wide("open"), wide(target));
+    let null = std::ptr::null();
+    // ShellExecute devuelve un valor mayor que 32 si lo ha podido abrir.
+    let code = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), target.as_ptr(), null, null, SW_SHOWNORMAL) };
+    if code > 32 { Ok(()) } else { Err(format!("No se pudo abrir el enlace (error {code})")) }
+}
+
+#[cfg(not(windows))]
+fn shell_open(_: &str) -> Result<(), String> {
+    Err("Abrir enlaces solo está disponible en Windows".into())
+}
+
+#[cfg(windows)]
+const SW_SHOWNORMAL: i32 = 1;
+
+#[cfg(windows)]
+#[link(name = "shell32")]
+extern "system" {
+    fn ShellExecuteW(
+        hwnd: *mut std::ffi::c_void,
+        operation: *const u16,
+        file: *const u16,
+        parameters: *const u16,
+        directory: *const u16,
+        show_cmd: i32,
+    ) -> isize;
+}
+
 #[tauri::command]
 fn startup_file(state: tauri::State<StartupFile>) -> Option<String> {
     state.0.lock().ok()?.take()
@@ -267,6 +325,8 @@ pub fn run() {
             windows::forward_to_window(app, windows::pdf_args(&argv, &cwd));
         }))
         .plugin(tauri_plugin_dialog::init())
+        // Ni un enlace ni un script pueden llevar una ventana fuera de la app (ver `is_app_url`).
+        .plugin(tauri::plugin::Builder::<_, ()>::new("navegacion").on_navigation(|_, url| is_app_url(url)).build())
         .manage(StartupFile(Mutex::new(startup)))
         .manage(windows::WindowPayloads::default())
         .manage(windows::LastFocused::default())
@@ -280,6 +340,12 @@ pub fn run() {
         .setup(|app| {
             let dll = find_pdfium(app);
             app.manage(PdfiumPath(dll));
+            // La ventana principal se crea aquí para que no pueda abrir ventanas nuevas por su
+            // cuenta (window.open, enlaces con target="_blank"): los enlaces van por open_external.
+            let main = app.config().app.windows.iter().find(|w| w.label == "main").cloned().ok_or("Falta la ventana main")?;
+            tauri::WebviewWindowBuilder::from_config(app.handle(), &main)?
+                .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
+                .build()?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -294,6 +360,7 @@ pub fn run() {
             extract_pages,
             bake_annotations,
             user_name,
+            open_external,
             extension_setup::extension_info,
             extension_setup::open_extension_folder,
             extension_setup::open_browser_extensions,
@@ -321,5 +388,32 @@ mod tests {
         // Rechazada antes de leer: no llega a abrir el archivo.
         let ini = pdf_edit::read_source(&Some(r"C:\Windows\win.ini".into()), &None, "la imagen", IMAGES);
         assert!(ini.unwrap_err().starts_with("Solo se admiten"));
+    }
+
+    #[test]
+    fn window_stays_in_the_app() {
+        let url = |s: &str| tauri::Url::parse(s).unwrap();
+        assert!(is_app_url(&url("http://tauri.localhost/index.html")));
+        assert!(is_app_url(&url("tauri://localhost/")));
+        assert!(is_app_url(&url("about:blank")));
+        assert!(!is_app_url(&url("https://example.com/")));
+        assert!(!is_app_url(&url("http://tauri.localhost.example.com/")));
+        assert!(!is_app_url(&url("file:///C:/Windows/win.ini")));
+    }
+
+    #[test]
+    fn only_web_and_mail_links_open_outside() {
+        assert!(external_url("https://example.com/a?b=1").is_ok());
+        assert!(external_url("mailto:alguien@example.com").is_ok());
+        for bad in [
+            "javascript:alert(1)",
+            "file:///C:/Windows/System32/calc.exe",
+            "ms-msdt:/id PCWDiagnostic",
+            "search-ms:query=x",
+            r"\\servidor\recurso\x.exe",
+            "C:\\Windows\\System32\\calc.exe",
+        ] {
+            assert!(external_url(bad).is_err(), "{bad}");
+        }
     }
 }

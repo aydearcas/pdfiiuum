@@ -12,6 +12,7 @@ import { IMAGE_RESOURCES, type PDFDocument } from "../lib/pdf";
 import { contains, type Annot, type MarkupKind, type Point } from "../lib/annotations";
 import { readSelection, type TextSelection } from "../lib/selection";
 import { isEditTool, isMarkupTool, type Tool, type ToolStyle } from "../lib/tools";
+import { isTauri, openExternal } from "../lib/platform";
 import AnnotationLayer, { type LayerCallbacks } from "./AnnotationLayer";
 import EditLayer from "./EditLayer";
 import type { PageContent, PageEdit } from "../lib/edit";
@@ -221,8 +222,21 @@ export default function Viewer(props: Props) {
     const onSelectionChange = () => {
       if (window.getSelection()?.isCollapsed) cbs.current.onTextSelection(null);
     };
+    // Escritorio: un enlace externo del PDF navegaría la propia ventana de la app (y se perdería
+    // lo no guardado). Se abre fuera, tras confirmarlo; los internos («#…») los sigue pdf.js.
+    const onLink = (e: MouseEvent) => {
+      const a = (e.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
+      if (!a || a.getAttribute("href")!.startsWith("#")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.type === "click") openExternal(a.href).catch(console.error);
+    };
     container.addEventListener("mousedown", onDown);
     container.addEventListener("contextmenu", onContextMenu);
+    if (isTauri) {
+      container.addEventListener("click", onLink, true);
+      container.addEventListener("auxclick", onLink, true);
+    }
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
     document.addEventListener("selectionchange", onSelectionChange);
@@ -231,6 +245,8 @@ export default function Viewer(props: Props) {
       container.removeEventListener("wheel", onWheel);
       container.removeEventListener("mousedown", onDown);
       container.removeEventListener("contextmenu", onContextMenu);
+      container.removeEventListener("click", onLink, true);
+      container.removeEventListener("auxclick", onLink, true);
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
       document.removeEventListener("selectionchange", onSelectionChange);

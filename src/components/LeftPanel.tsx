@@ -3,6 +3,7 @@ import { Bookmark, ChevronRight, ExternalLink, LayoutGrid, PanelLeftClose, Panel
 import Thumbnails, { type PageEditing } from "./Thumbnails";
 import type { PDFDocument } from "../lib/pdf";
 import { ancestorsOf, currentNode, type OutlineNode } from "../lib/outline";
+import { openExternal } from "../lib/platform";
 
 export type LeftView = "thumbs" | "outline";
 
@@ -203,7 +204,7 @@ function OutlineTree({
             onClick={() => {
               setPicked(n);
               if (n.dest) onGoToDest(n.dest);
-              else if (n.url) window.open(n.url, "_blank", "noopener");
+              else if (n.url) openExternal(n.url).catch(console.error);
             }}
           >
             {hasChildren ? (

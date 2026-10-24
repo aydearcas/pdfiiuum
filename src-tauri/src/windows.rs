@@ -70,6 +70,8 @@ pub async fn drop_tab(
         .min_inner_size(720.0, 480.0)
         .theme(Some(tauri::Theme::Dark))
         .focused(true)
+        // Como la principal: sin ventanas nuevas abiertas desde la página (ver lib.rs).
+        .on_new_window(|_, _| tauri::webview::NewWindowResponse::Deny)
         .build()
         .map_err(|e| e.to_string())?;
     // La pestaña queda bajo el puntero, como al arrastrarla.
