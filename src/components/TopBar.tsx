@@ -49,11 +49,16 @@ interface Props {
 }
 
 const PRESETS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
+/** Zoom que se puede escribir, en %, como en el visor (Ctrl + rueda). */
+const MIN_ZOOM = 10;
+const MAX_ZOOM = 1000;
 
 export default function TopBar(p: Props) {
   const [pageInput, setPageInput] = useState(String(p.page));
   const [zoomOpen, setZoomOpen] = useState(false);
+  const [zoomInput, setZoomInput] = useState(String(Math.round(p.scale * 100)));
   useEffect(() => setPageInput(String(p.page)), [p.page]);
+  useEffect(() => setZoomInput(String(Math.round(p.scale * 100))), [p.scale]);
 
   useEffect(() => {
     if (!zoomOpen) return;
@@ -61,6 +66,16 @@ export default function TopBar(p: Props) {
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, [zoomOpen]);
+
+  /** «150», «150 %» o «87,5»: se limita al intervalo admitido; lo que no es un número se descarta. */
+  const commitZoom = () => {
+    const n = parseFloat(zoomInput.replace(",", ".").replace(/[^\d.]/g, ""));
+    if (Number.isFinite(n) && n > 0) {
+      const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, n));
+      p.onScale(z / 100);
+      setZoomInput(String(Math.round(z)));
+    } else setZoomInput(String(Math.round(p.scale * 100)));
+  };
 
   const commitPage = () => {
     const n = parseInt(pageInput, 10);
@@ -114,16 +129,37 @@ export default function TopBar(p: Props) {
           <span className="divider" />
           <IconButton icon={ZoomOut} label="Alejar (Ctrl+-)" onClick={p.onZoomOut} />
           <div className="zoom">
-            <button
-              className="zoom-btn"
-              onClick={(e) => {
-                e.stopPropagation();
-                setZoomOpen((v) => !v);
-              }}
-            >
-              {Math.round(p.scale * 100)}%
-              <ChevronDown size={14} />
-            </button>
+            <div className="zoom-box">
+              <input
+                className="zoom-input"
+                value={zoomInput}
+                inputMode="decimal"
+                aria-label="Zoom (%)"
+                title={`Escribe el zoom (de ${MIN_ZOOM} a ${MAX_ZOOM} %) y pulsa Intro`}
+                onChange={(e) => setZoomInput(e.target.value)}
+                onFocus={(e) => e.currentTarget.select()}
+                onBlur={commitZoom}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.currentTarget.blur();
+                  else if (e.key === "Escape") {
+                    setZoomInput(String(Math.round(p.scale * 100)));
+                    // El valor se restaura antes de que el blur lo confirme.
+                    requestAnimationFrame(() => (e.target as HTMLInputElement).blur());
+                  }
+                }}
+              />
+              <span className="zoom-pct">%</span>
+              <button
+                className="zoom-btn"
+                aria-label="Opciones de zoom"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setZoomOpen((v) => !v);
+                }}
+              >
+                <ChevronDown size={14} />
+              </button>
+            </div>
             {zoomOpen && (
               <div className="menu">
                 <button onClick={() => p.onScale("page-width")}>
