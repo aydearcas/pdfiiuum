@@ -1,5 +1,6 @@
 pub mod native_host;
 mod pdf_edit;
+mod pdf_pages;
 mod pdf_engine;
 mod windows;
 
@@ -164,6 +165,45 @@ async fn edit_page(request: Request<'_>, pdfium: tauri::State<'_, PdfiumPath>) -
     .map_err(|e| e.to_string())?
 }
 
+/// Cuerpo: [JSON PagesEdit][PDF]. Respuesta: el PDF con las páginas giradas, borradas, movidas o insertadas.
+#[tauri::command]
+async fn edit_pages(request: Request<'_>, pdfium: tauri::State<'_, PdfiumPath>) -> Result<Response, String> {
+    let (json, pdf) = split_framed(raw_body(&request)?)?;
+    let edit: pdf_pages::PagesEdit = serde_json::from_slice(json).map_err(|e| e.to_string())?;
+    let pdf = pdf.to_vec();
+    let dll = pdfium.0.clone();
+    tauri::async_runtime::spawn_blocking(move || pdf_pages::edit_pages(&dll, &pdf, &edit).map(Response::new))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Cuerpo: [JSON [páginas desde 0]][PDF]. Respuesta: un PDF nuevo con solo esas páginas.
+#[tauri::command]
+async fn extract_pages(request: Request<'_>, pdfium: tauri::State<'_, PdfiumPath>) -> Result<Response, String> {
+    let (json, pdf) = split_framed(raw_body(&request)?)?;
+    let pages: Vec<i32> = serde_json::from_slice(json).map_err(|e| e.to_string())?;
+    let pdf = pdf.to_vec();
+    let dll = pdfium.0.clone();
+    tauri::async_runtime::spawn_blocking(move || pdf_pages::extract_pages(&dll, &pdf, &pages).map(Response::new))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Como `save_annotated` pero sin escribir el archivo: escribe en el PDF las anotaciones
+/// pendientes (antes de operaciones que cambian las páginas).
+#[tauri::command]
+async fn bake_annotations(request: Request<'_>, pdfium: tauri::State<'_, PdfiumPath>) -> Result<Response, String> {
+    let (json, pdf) = split_framed(raw_body(&request)?)?;
+    let req: SaveRequest = serde_json::from_slice(json).map_err(|e| e.to_string())?;
+    let pdf = pdf.to_vec();
+    let dll = pdfium.0.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        pdf_engine::apply_annotations(&dll, &pdf, &req.remove, &req.add).map(Response::new)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Nombre de usuario de Windows: autor de los comentarios.
 #[tauri::command]
 fn user_name() -> String {
@@ -228,6 +268,9 @@ pub fn run() {
             extract_annotations,
             page_content,
             edit_page,
+            edit_pages,
+            extract_pages,
+            bake_annotations,
             user_name,
             windows::drop_tab,
             windows::take_window_payload

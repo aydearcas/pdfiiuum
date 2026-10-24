@@ -5,7 +5,7 @@ import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { NativeExisting } from "./annotations";
-import type { PageContent, PageEdit } from "./edit";
+import type { PageContent, PageEdit, PagesEdit } from "./edit";
 
 export const isTauri = "__TAURI_INTERNALS__" in window;
 
@@ -140,6 +140,29 @@ export async function editPage(
     await invoke<ArrayBuffer>("edit_page", framed({ page: page - 1, edit }, pdf)),
   );
   return { bytes, notice: meta.notice };
+}
+
+/** Gira, borra, mueve o inserta páginas. Devuelve el PDF resultante. */
+export async function editPages(pdf: Uint8Array, edit: PagesEdit): Promise<Uint8Array> {
+  return new Uint8Array(await invoke<ArrayBuffer>("edit_pages", framed(edit, pdf)));
+}
+
+/** PDF nuevo con esas páginas (desde 1). */
+export async function extractPages(pdf: Uint8Array, pages: number[]): Promise<Uint8Array> {
+  return new Uint8Array(await invoke<ArrayBuffer>("extract_pages", framed(pages.map((p) => p - 1), pdf)));
+}
+
+/** Escribe en el PDF las anotaciones pendientes, sin guardarlo en disco. */
+export async function bakeAnnotations(
+  pdf: Uint8Array,
+  changes: { remove: [number, number][]; add: unknown[] },
+): Promise<Uint8Array> {
+  return new Uint8Array(await invoke<ArrayBuffer>("bake_annotations", framed(changes, pdf)));
+}
+
+/** Elige un PDF para insertar sus páginas (ruta, o null si se cancela). */
+export async function pickPdfPath(): Promise<string | null> {
+  return open({ multiple: false, directory: false, filters: PDF_FILTER });
 }
 
 /** Elige una imagen para insertarla en el PDF (ruta, o null si se cancela). */

@@ -86,6 +86,12 @@ export default function App() {
   useEffect(() => writePref(PEN_DRAWS_PREF, toolStyle.penDraws), [toolStyle.penDraws]);
   const [sidebarOpen, setSidebarOpen] = useState(() => readPref(LEFT_OPEN_PREF, true));
   const [leftCollapsed, setLeftCollapsed] = useState(() => readPref(LEFT_COLLAPSED_PREF, false));
+  // «Organizar páginas» trabaja sobre las miniaturas: el panel izquierdo tiene que verse.
+  useEffect(() => {
+    if (tool !== "pages") return;
+    setSidebarOpen(true);
+    setLeftCollapsed(false);
+  }, [tool]);
   const [commentsOpen, setCommentsOpen] = useState(() => readPref(COMMENTS_PREF, true));
   const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null);
   const [dragOver, setDragOver] = useState(false);

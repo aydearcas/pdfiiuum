@@ -842,6 +842,55 @@ button {
   stroke-linejoin: round;
 }
 /* ---------- Modo edición ---------- */
+.page-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.page-tools .mini-btn.danger:hover:not(:disabled) {
+  background: var(--accent);
+  color: #fff;
+}
+.page-tools-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.thumbs.editing .thumb {
+  touch-action: none;
+}
+.thumbs.dragging,
+.thumbs.dragging .thumb {
+  cursor: grabbing;
+}
+.thumb.selected .thumb-paper {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+.thumb.drop-before,
+.thumb.drop-after {
+  position: relative;
+}
+.thumb.drop-before::before,
+.thumb.drop-after::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.thumb.drop-before::before {
+  top: -3px;
+}
+.thumb.drop-after::after {
+  bottom: -3px;
+}
 .edit-layer {
   position: absolute;
   inset: 0;
@@ -964,12 +1013,15 @@ button {
   left: 50%;
   top: 12px;
   transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 32px);
+  box-sizing: border-box;
   padding: 7px 14px;
-  border-radius: 999px;
+  border-radius: 14px;
   background: rgba(13, 14, 16, 0.88);
   color: #fff;
   font-size: 12.5px;
-  white-space: nowrap;
+  text-align: center;
   pointer-events: none;
   z-index: 20;
 }

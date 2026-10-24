@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   Eraser,
+  Files,
   Hand,
   Highlighter,
   ImagePlus,
@@ -43,6 +44,7 @@ const EDIT_TOOLS: { tool: EditTool; icon: typeof Hand; label: string }[] = [
   { tool: "addtext", icon: LetterText, label: "Añadir texto al PDF" },
   { tool: "objects", icon: Images, label: "Mover, cambiar tamaño o borrar imágenes" },
   { tool: "cover", icon: Eraser, label: "Tapar una zona" },
+  { tool: "pages", icon: Files, label: "Organizar páginas" },
 ];
 
 export default function ToolRail({ tool, style, disabled, onTool, onStyle, onInsertImage }: Props) {

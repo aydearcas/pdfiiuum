@@ -343,7 +343,7 @@ export default function Viewer(props: Props) {
                 onDelete={props.onDelete}
                 onEdit={props.onEdit}
               />
-              {isEditTool(tool) && (
+              {isEditTool(tool) && tool !== "pages" && (
                 <EditLayer
                   page={page}
                   viewport={viewer.getPageView(page - 1).viewport}

@@ -59,6 +59,8 @@ El icono muestra ✓ cuando el PDF se ha abierto y ! si algo ha fallado (al pasa
   - **Añadir texto al PDF** como contenido (no como anotación), en Sans, Serif o Mono, con el color y el tamaño de la herramienta de texto.
   - **Insertar imagen** (PNG, JPEG, GIF, BMP o WebP; el JPEG va sin recomprimir) y **mover, cambiar el tamaño o borrar imágenes** del PDF.
   - **Tapar una zona**: rectángulo blanco que además quita el texto y las imágenes que quedan enteros debajo (lo que queda tapado solo en parte sigue en el PDF: no es un borrado seguro).
+  - **Organizar páginas**: en las miniaturas se seleccionan páginas (Ctrl o Mayús para varias) y se arrastran para reordenarlas; también se giran, se borran (Supr), se inserta una página en blanco u otro PDF detrás y se extraen a un PDF nuevo. Las anotaciones sin guardar se escriben antes en el PDF para que sigan en su página.
+  - Ctrl+Z / Ctrl+Y deshacen y rehacen los cambios del modo edición mientras está activa una de sus herramientas.
 
 ## Tecnología
 
@@ -93,7 +95,8 @@ Cierra y vuelve a abrir la terminal después de instalar Rust. También hace fal
 - `src-tauri/src/pdf_engine.rs` — escritura de anotaciones con PDFium.
 - `src-tauri/src/windows.rs` — varias ventanas, mover pestañas e instancia única.
 - `src-tauri/windows/hooks.nsh` — registro del instalador como lector de PDF y del puente con la extensión.
-- `src-tauri/src/pdf_edit.rs` — modo edición: tramos de texto de cada página y su corrección con PDFium.
+- `src-tauri/src/pdf_edit.rs` — modo edición: tramos de texto e imágenes de cada página y sus cambios con PDFium.
+- `src-tauri/src/pdf_pages.rs` — modo edición: girar, borrar, mover, insertar y extraer páginas.
 - `src-tauri/src/native_host.rs` — puente con la extensión: Edge o Chrome arrancan `pdfiiuum.exe chrome-extension://…` y le pasan el PDF por mensajería nativa.
 - `browser-extension/` — extensión «Abrir en pdfiiuum». Su identificador (`ehgjjipbmdcgnpmfclngigpianjmnalh`) sale de la clave pública `key` de `manifest.json` y debe coincidir con `allowed_origins` en `src-tauri/windows/native-messaging-host.json`. La clave privada no está en el repositorio: solo hace falta para publicarla en la Chrome Web Store con el mismo identificador.
 

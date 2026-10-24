@@ -8,7 +8,7 @@ import type { EditTool, ToolStyle } from "../lib/tools";
 interface Props {
   page: number;
   viewport: PageViewport;
-  tool: EditTool;
+  tool: Exclude<EditTool, "pages">;
   style: ToolStyle;
   getContent(page: number): Promise<PageContent>;
   /** Aplica el cambio; resuelve a false si no se pudo. */

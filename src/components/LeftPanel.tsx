@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Bookmark, ChevronRight, ExternalLink, LayoutGrid, PanelLeftClose, PanelLeftOpen } from "lucide-react";
-import Thumbnails from "./Thumbnails";
+import Thumbnails, { type PageEditing } from "./Thumbnails";
 import type { PDFDocument } from "../lib/pdf";
 import { ancestorsOf, currentNode, type OutlineNode } from "../lib/outline";
 
@@ -17,6 +17,16 @@ interface Props {
   onToggleCollapsed(): void;
   onGoToPage(page: number): void;
   onGoToDest(dest: string | unknown[]): void;
+  /** Modo «Organizar páginas»: selección, reordenar y botones de acciones. */
+  pageTools?: { editing: PageEditing; actions: PageAction[] };
+}
+
+export interface PageAction {
+  label: string;
+  icon: typeof Bookmark;
+  disabled?: boolean;
+  danger?: boolean;
+  onClick(): void;
 }
 
 /** Panel izquierdo: miniaturas o marcadores. Se recoge en una franja con sus dos iconos. */
@@ -79,8 +89,34 @@ export default function LeftPanel(p: Props) {
           <PanelLeftClose size={16} />
         </button>
       </header>
-      {p.view === "thumbs" ? (
-        <Thumbnails doc={p.doc} currentPage={p.currentPage} onSelect={p.onGoToPage} />
+      {p.pageTools && (
+        <div className="page-tools">
+          {p.pageTools.actions.map((a) => (
+            <button
+              key={a.label}
+              className={`mini-btn${a.danger ? " danger" : ""}`}
+              title={a.label}
+              aria-label={a.label}
+              disabled={a.disabled}
+              onClick={a.onClick}
+            >
+              <a.icon size={16} />
+            </button>
+          ))}
+          {p.pageTools.editing.selected.length > 1 && (
+            <span className="page-tools-count" title="Páginas seleccionadas">
+              {p.pageTools.editing.selected.length}
+            </span>
+          )}
+        </div>
+      )}
+      {p.view === "thumbs" || p.pageTools ? (
+        <Thumbnails
+          doc={p.doc}
+          currentPage={p.currentPage}
+          onSelect={p.onGoToPage}
+          editing={p.pageTools?.editing}
+        />
       ) : (
         <OutlineTree
           nodes={p.outline}

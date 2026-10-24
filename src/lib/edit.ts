@@ -40,6 +40,14 @@ export type PageEdit =
   | { op: "addImage"; path: string; center: [number, number]; max: [number, number] }
   | { op: "cover"; rect: Rect };
 
+/** Operación con páginas (índices desde 0); la aplica `edit_pages` en Rust. */
+export type PagesEdit =
+  | { op: "rotate"; pages: number[]; quarters: number }
+  | { op: "delete"; pages: number[] }
+  | { op: "move"; pages: number[]; to: number }
+  | { op: "insertBlank"; at: number; like: number }
+  | { op: "insertFile"; at: number; path: string };
+
 export const EDIT_FONTS: { font: EditFont; label: string; css: string }[] = [
   { font: "sans", label: "Sans", css: "Helvetica, Arial, sans-serif" },
   { font: "serif", label: "Serif", css: '"Times New Roman", Times, serif' },

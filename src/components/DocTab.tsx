@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from "react";
-import { Copy } from "lucide-react";
-import LeftPanel, { type LeftView } from "./LeftPanel";
+import { Copy, FileInput, FileOutput, FilePlus, RotateCcw, RotateCw, Trash2 } from "lucide-react";
+import LeftPanel, { type LeftView, type PageAction } from "./LeftPanel";
 import { loadOutline, type OutlineNode } from "../lib/outline";
 import SearchBar from "./SearchBar";
 import SelectionMenu, { type MenuItem } from "./SelectionMenu";
@@ -11,9 +11,22 @@ import { bounds, diffAnnots, newId, pdfDate, toNative, type Annot, type MarkupKi
 import { openDocument } from "../lib/document";
 import type { TextSelection } from "../lib/selection";
 import { isEditTool, type EditTool, type Tool, type ToolStyle } from "../lib/tools";
-import type { PageContent, PageEdit } from "../lib/edit";
+import type { PageContent, PageEdit, PagesEdit } from "../lib/edit";
 import { useAnnotations } from "../lib/useAnnotations";
-import { baseName, editPage, getUserName, isTauri, pageContent, pickImage, saveAnnotated, savePdf } from "../lib/platform";
+import {
+  bakeAnnotations,
+  baseName,
+  editPage,
+  editPages,
+  extractPages,
+  getUserName,
+  isTauri,
+  pageContent,
+  pickImage,
+  pickPdfPath,
+  saveAnnotated,
+  savePdf,
+} from "../lib/platform";
 
 /** Documento con el que se crea una pestaña. */
 export interface TabInit {
@@ -93,7 +106,15 @@ const EDIT_HINTS: Record<EditTool, string> = {
   addtext: "Haz clic donde quieras escribir · Ctrl+Intro termina · Esc cancela",
   objects: "Arrastra una imagen para moverla · su esquina cambia el tamaño · Supr la borra",
   cover: "Arrastra para tapar una zona: se pinta de blanco y se quita lo que quede entero debajo",
+  pages: "Selecciona páginas en el panel (Ctrl o Mayús para varias) · arrástralas para reordenar · Supr las borra",
 };
+
+/** Paso del historial del modo edición: el PDF anterior y si el cambio fue de páginas. */
+interface EditStep {
+  bytes: Uint8Array;
+  /** Las operaciones de páginas escriben antes las anotaciones pendientes en el PDF. */
+  pages: boolean;
+}
 
 export default function DocTab(p: Props) {
   const { id, active, tool, toolStyle, setTool, setToolStyle, notify, copyText, onStatus } = p;
@@ -113,7 +134,9 @@ export default function DocTab(p: Props) {
   const changes = useMemo(() => diffAnnots(doc.baseline, annots), [doc.baseline, annots]);
   // Modo edición: el PDF tal como está en disco y los PDF anteriores para deshacer.
   const diskBytes = useRef(p.init.bytes);
-  const [edits, setEdits] = useState<{ past: Uint8Array[]; future: Uint8Array[] }>({ past: [], future: [] });
+  const [edits, setEdits] = useState<{ past: EditStep[]; future: EditStep[] }>({ past: [], future: [] });
+  // Páginas seleccionadas en «Organizar páginas» (desde 1).
+  const [pageSel, setPageSel] = useState<number[]>([]);
   const editBusy = useRef(false);
   const edited = doc.bytes !== diskBytes.current;
   const dirty = changes.dirty || edited;
@@ -204,6 +227,7 @@ export default function DocTab(p: Props) {
   // Al cambiar de herramienta se cierran selección y menús.
   useEffect(() => {
     setTextSel(null);
+    if (tool !== "pages") setPageSel([]);
     if (tool !== "select") {
       setSelectedId(null);
       setEditingId(null);
@@ -310,13 +334,24 @@ export default function DocTab(p: Props) {
 
   // ---------- Modo edición ----------
 
-  /** Muestra otro PDF (corregido, o el anterior al deshacer) conservando la vista y las anotaciones. */
-  const showBytes = useCallback(async (bytes: Uint8Array) => {
-    const d = docRef.current;
-    const view = viewer.current?.viewState();
-    const reopened = await openDocument(bytes);
-    setDoc({ ...d, ...reopened, bytes, view });
-  }, []);
+  /**
+   * Muestra otro PDF (editado, o el anterior al deshacer) conservando la vista. Con `pages`, las
+   * anotaciones pasan a ser las del PDF nuevo (sus páginas han cambiado).
+   */
+  const showBytes = useCallback(
+    async (bytes: Uint8Array, pages = false) => {
+      const d = docRef.current;
+      const view = viewer.current?.viewState();
+      const reopened = await openDocument(bytes);
+      setDoc({ ...d, ...reopened, bytes, view });
+      if (pages) {
+        history.reset(reopened.baseline);
+        clearSelection();
+      }
+      return reopened.pdf.numPages;
+    },
+    [history.reset, clearSelection],
+  );
 
   // Contenido editable de cada página, leído una vez por versión del PDF.
   const contentCache = useMemo(() => new Map<number, Promise<PageContent>>(), [doc.bytes]);
@@ -340,7 +375,7 @@ export default function DocTab(p: Props) {
       try {
         const result = await editPage(before, n, change);
         await showBytes(result.bytes);
-        setEdits((s) => ({ past: [...s.past, before].slice(-50), future: [] }));
+        setEdits((s) => ({ past: [...s.past, { bytes: before, pages: false }].slice(-50), future: [] }));
         if (result.notice) notify(result.notice);
         return true;
       } catch (e) {
@@ -372,11 +407,17 @@ export default function DocTab(p: Props) {
     async (redo: boolean) => {
       const from = redo ? edits.future : edits.past;
       if (editBusy.current || !from.length) return;
-      editBusy.current = true;
-      const current = docRef.current.bytes;
       const target = redo ? from[0] : from[from.length - 1];
+      // Deshacer una operación de páginas sustituye las anotaciones: no se pierden cambios.
+      if (target.pages && changesRef.current.dirty) {
+        notify("Guarda o deshaz antes los cambios en las anotaciones (fuera del modo edición)", true);
+        return;
+      }
+      editBusy.current = true;
+      const current: EditStep = { bytes: docRef.current.bytes, pages: target.pages };
       try {
-        await showBytes(target);
+        await showBytes(target.bytes, target.pages);
+        if (target.pages) setPageSel([]);
         setEdits((s) =>
           redo
             ? { past: [...s.past, current], future: s.future.slice(1) }
@@ -386,7 +427,101 @@ export default function DocTab(p: Props) {
         editBusy.current = false;
       }
     },
-    [edits, showBytes],
+    [edits, showBytes, notify],
+  );
+
+  // ---------- Organizar páginas ----------
+
+  /**
+   * Aplica una operación de páginas. Las anotaciones pendientes se escriben antes en el PDF
+   * (sus números de página cambian con la operación). `select` da las páginas que quedan
+   * seleccionadas según el nuevo número de páginas.
+   */
+  const pagesOp = useCallback(
+    async (edit: PagesEdit, select: (count: number) => number[]) => {
+      if (editBusy.current) return;
+      editBusy.current = true;
+      try {
+        const d = docRef.current;
+        const { remove, add, dirty: pending } = changesRef.current;
+        const base = pending ? await bakeAnnotations(d.bytes, { remove, add: add.map(toNative) }) : d.bytes;
+        const count = await showBytes(await editPages(base, edit), true);
+        setEdits((s) => ({ past: [...s.past, { bytes: base, pages: true }].slice(-50), future: [] }));
+        setPageSel(select(count).filter((n) => n >= 1 && n <= count));
+      } catch (e) {
+        notify(`No se pudo cambiar las páginas: ${e instanceof Error ? e.message : e}`, true);
+      } finally {
+        editBusy.current = false;
+      }
+    },
+    [showBytes, notify],
+  );
+
+  const pageCount = doc.pdf.numPages;
+  const selection = pageSel.length ? pageSel : [page];
+  const zeroBased = selection.map((n) => n - 1);
+  const after = Math.max(...selection);
+  const range = (from: number, n: number) => Array.from({ length: n }, (_, i) => from + i);
+
+  const deletePages = useCallback(() => {
+    if (selection.length >= pageCount) return notify("Un PDF tiene que tener al menos una página", true);
+    pagesOp({ op: "delete", pages: zeroBased }, () => []);
+  }, [selection, pageCount, zeroBased, pagesOp, notify]);
+
+  const pageActions: PageAction[] = [
+    {
+      label: "Girar a la izquierda",
+      icon: RotateCcw,
+      onClick: () => pagesOp({ op: "rotate", pages: zeroBased, quarters: -1 }, () => selection),
+    },
+    {
+      label: "Girar a la derecha",
+      icon: RotateCw,
+      onClick: () => pagesOp({ op: "rotate", pages: zeroBased, quarters: 1 }, () => selection),
+    },
+    {
+      label: "Insertar página en blanco detrás",
+      icon: FilePlus,
+      onClick: () => pagesOp({ op: "insertBlank", at: after, like: after - 1 }, () => [after + 1]),
+    },
+    {
+      label: "Insertar otro PDF detrás…",
+      icon: FileInput,
+      onClick: async () => {
+        const path = await pickPdfPath();
+        if (path) pagesOp({ op: "insertFile", at: after, path }, (count) => range(after + 1, count - pageCount));
+      },
+    },
+    {
+      label: "Extraer a un PDF nuevo…",
+      icon: FileOutput,
+      onClick: async () => {
+        try {
+          const d = docRef.current;
+          const { remove, add, dirty: pending } = changesRef.current;
+          const base = pending ? await bakeAnnotations(d.bytes, { remove, add: add.map(toNative) }) : d.bytes;
+          const out = await extractPages(base, selection);
+          const stem = d.name.replace(/\.pdf$/i, "");
+          const label = selection.length === 1 ? `pág. ${selection[0]}` : `págs. ${selection.join(", ")}`;
+          const target = await savePdf(out, `${stem} (${label}).pdf`, null, true);
+          if (target) notify(`Páginas guardadas en ${baseName(target)}`);
+        } catch (e) {
+          notify(`No se pudieron extraer las páginas: ${e instanceof Error ? e.message : e}`, true);
+        }
+      },
+    },
+    { label: "Borrar páginas (Supr)", icon: Trash2, danger: true, onClick: deletePages },
+  ];
+
+  const movePages = useCallback(
+    (moving: number[], before: number) => {
+      const sorted = [...moving].sort((a, b) => a - b);
+      // Posición de la primera en el documento resultante (desde 0).
+      const to = before - 1 - sorted.filter((n) => n < before).length;
+      if (sorted.every((n, i) => n - 1 === to + i)) return; // ya están ahí
+      pagesOp({ op: "move", pages: sorted.map((n) => n - 1), to }, () => range(to + 1, sorted.length));
+    },
+    [pagesOp],
   );
 
   useImperativeHandle(
@@ -403,6 +538,10 @@ export default function DocTab(p: Props) {
       rotate: () => viewer.current?.rotate(),
       toggleSearch: (open) => setSearchOpen((v) => open ?? !v),
       deleteSelected: () => {
+        if (tool === "pages") {
+          deletePages();
+          return true;
+        }
         if (!selectedId) return false;
         onDelete(selectedId);
         return true;
@@ -417,7 +556,7 @@ export default function DocTab(p: Props) {
       }),
       insertImage,
     }),
-    [save, history.undo, history.redo, selectedId, onDelete, clearSelection, editMode, undoEdit, insertImage],
+    [save, history.undo, history.redo, selectedId, onDelete, clearSelection, editMode, undoEdit, insertImage, tool, deletePages],
   );
 
   // Panel lateral: notas y marcas en orden de lectura; «Sin guardar» las nuevas o cambiadas.
@@ -484,6 +623,11 @@ export default function DocTab(p: Props) {
           onToggleCollapsed={p.onToggleLeftCollapsed}
           onGoToPage={(n) => viewer.current?.goToPage(n)}
           onGoToDest={(d) => viewer.current?.goToDest(d)}
+          pageTools={
+            tool === "pages"
+              ? { editing: { selected: pageSel, onSelectPages: setPageSel, onMove: movePages }, actions: pageActions }
+              : undefined
+          }
         />
       )}
       <main className="stage">
