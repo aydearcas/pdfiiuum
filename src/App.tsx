@@ -46,6 +46,7 @@ const TOOL_KEYS: Record<string, Tool> = {
 const COMMENTS_PREF = "pdfiiuum.commentsOpen";
 const LEFT_OPEN_PREF = "pdfiiuum.leftPanelOpen";
 const LEFT_COLLAPSED_PREF = "pdfiiuum.leftPanelCollapsed";
+const PEN_DRAWS_PREF = "pdfiiuum.penDraws";
 
 /** Preferencias de este equipo; sin almacenamiento disponible se usa el valor por defecto. */
 function readPref(key: string, fallback: boolean): boolean {
@@ -76,7 +77,11 @@ export default function App() {
   const [closing, setClosing] = useState<Set<string>>(new Set());
   const [statuses, setStatuses] = useState<Record<string, TabStatus>>({});
   const [tool, setTool] = useState<Tool>("select");
-  const [toolStyle, setToolStyle] = useState<ToolStyle>(DEFAULT_STYLE);
+  const [toolStyle, setToolStyle] = useState<ToolStyle>(() => ({
+    ...DEFAULT_STYLE,
+    penDraws: readPref(PEN_DRAWS_PREF, DEFAULT_STYLE.penDraws),
+  }));
+  useEffect(() => writePref(PEN_DRAWS_PREF, toolStyle.penDraws), [toolStyle.penDraws]);
   const [sidebarOpen, setSidebarOpen] = useState(() => readPref(LEFT_OPEN_PREF, true));
   const [leftCollapsed, setLeftCollapsed] = useState(() => readPref(LEFT_COLLAPSED_PREF, false));
   const [commentsOpen, setCommentsOpen] = useState(() => readPref(COMMENTS_PREF, true));

@@ -201,6 +201,8 @@ export default function Viewer(props: Props) {
     const onContextMenu = (e: MouseEvent) => {
       e.preventDefault();
       if (toolRef.current !== "select") return;
+      // Mantener el lápiz pulsado o su botón lateral no abren menús cuando el lápiz dibuja.
+      if ((e as PointerEvent).pointerType === "pen" && cbs.current.style.penDraws) return;
       const at = new DOMRect(e.clientX, e.clientY, 0, 0);
       const sel = readSelection(viewer);
       if (sel) return cbs.current.onTextSelection({ ...sel, anchor: at });

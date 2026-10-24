@@ -114,6 +114,16 @@ export default function ToolRail({ tool, style, disabled, onTool, onStyle }: Pro
                   ))}
                 </div>
               )}
+              {annotTool === "ink" && (
+                <label className="option-check" title="Con el lápiz digital se dibuja aunque esté elegida otra herramienta">
+                  <input
+                    type="checkbox"
+                    checked={style.penDraws}
+                    onChange={(e) => onStyle({ ...style, penDraws: e.target.checked })}
+                  />
+                  El lápiz dibuja siempre
+                </label>
+              )}
             </div>
           )}
         </div>

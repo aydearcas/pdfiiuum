@@ -10,6 +10,8 @@ export interface ToolStyle {
   colors: Record<AnnotKind, string>;
   fontSize: number;
   inkWidth: number;
+  /** El lápiz digital dibuja con cualquier herramienta (como en OneNote). */
+  penDraws: boolean;
 }
 
 export const DEFAULT_STYLE: ToolStyle = {
@@ -23,4 +25,5 @@ export const DEFAULT_STYLE: ToolStyle = {
   },
   fontSize: 14,
   inkWidth: 2,
+  penDraws: true,
 };

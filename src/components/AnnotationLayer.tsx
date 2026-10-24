@@ -16,6 +16,18 @@ import {
   type Rect,
   type TextAnnot,
 } from "../lib/annotations";
+import {
+  ERASER_BUTTONS,
+  GROUP_GAP,
+  GROUP_MS,
+  distToInk,
+  finishStroke,
+  lastInk,
+  markPenSeen,
+  penSeen,
+  smoothPathD,
+  strokeAt,
+} from "../lib/ink";
 import type { Tool, ToolStyle } from "../lib/tools";
 
 export interface LayerCallbacks {
@@ -42,7 +54,8 @@ type Box = { left: number; top: number; width: number; height: number };
 
 export default function AnnotationLayer(p: Props) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const [draftInk, setDraftInk] = useState<Point[] | null>(null);
+  const draftRef = useRef<SVGPathElement>(null);
+  const cursorRef = useRef<SVGCircleElement>(null);
   const [draftText, setDraftText] = useState<Point | null>(null);
   const vp = p.viewport;
   const scale = vp.scale;
@@ -64,9 +77,15 @@ export default function AnnotationLayer(p: Props) {
 
   const creating = p.tool === "note" || p.tool === "text" || p.tool === "ink";
 
+  // Los listeners de dibujo viven fuera de React: ven siempre las props más recientes.
+  const latest = useRef(p);
+  latest.current = p;
+  useInk(rootRef, draftRef, cursorRef, latest);
+
   const onPointerDown = (e: RPointerEvent) => {
     // Fuera de las herramientas de creación la capa no recibe clics (pointer-events: none).
-    if (e.button !== 0 || !creating) return;
+    // El dibujo lo atiende useInk antes de que el evento llegue aquí.
+    if (e.button !== 0 || !creating || p.tool === "ink") return;
     e.preventDefault();
     e.stopPropagation();
     // Con un texto a medio escribir, el clic fuera solo lo confirma (preventDefault evita el blur).
@@ -88,34 +107,7 @@ export default function AnnotationLayer(p: Props) {
       });
     } else if (p.tool === "text") {
       setDraftText([pt[0], pt[1] + (p.style.fontSize * TEXT_LINE_HEIGHT) / 2]);
-    } else if (p.tool === "ink") {
-      (e.target as Element).setPointerCapture(e.pointerId);
-      setDraftInk([pt]);
     }
-  };
-
-  const onPointerMove = (e: RPointerEvent) => {
-    if (!draftInk) return;
-    const pt = toPdf(e);
-    const last = draftInk[draftInk.length - 1];
-    if (Math.hypot(pt[0] - last[0], pt[1] - last[1]) * scale < 1.5) return;
-    setDraftInk([...draftInk, pt]);
-  };
-
-  const onPointerUp = () => {
-    if (!draftInk) return;
-    if (draftInk.length > 1) {
-      p.onCreate({
-        id: newId(),
-        kind: "ink",
-        page: p.page,
-        color: p.style.colors.ink,
-        width: p.style.inkWidth,
-        strokes: [draftInk.map(([x, y]) => [round(x), round(y)])],
-        date: pdfDate(),
-      });
-    }
-    setDraftInk(null);
   };
 
   const commitDraftText = (text: string) => {
@@ -141,8 +133,6 @@ export default function AnnotationLayer(p: Props) {
       ref={rootRef}
       className={`annot-layer${creating ? " creating" : ""} tool-${p.tool}`}
       onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
     >
       <svg className="annot-svg" width={vp.width} height={vp.height}>
         {p.annots.map((a) => {
@@ -172,9 +162,9 @@ export default function AnnotationLayer(p: Props) {
           if (a.kind === "ink")
             return a.strokes.map((s, i) => (
               <g key={a.id + i} data-annot-id={a.id}>
-                <path d={pathD(s.map(toView))} className="ink" stroke={a.color} strokeWidth={a.width * scale} />
+                <path d={smoothPathD(s.map(toView))} className="ink" stroke={a.color} strokeWidth={a.width * scale} />
                 <path
-                  d={pathD(s.map(toView))}
+                  d={smoothPathD(s.map(toView))}
                   className="ink-hit"
                   strokeWidth={Math.max(12, a.width * scale + 8)}
                   onPointerDown={(e) => startDrag(e, a)}
@@ -183,14 +173,9 @@ export default function AnnotationLayer(p: Props) {
             ));
           return null;
         })}
-        {draftInk && (
-          <path
-            d={pathD(draftInk.map(toView))}
-            className="ink"
-            stroke={p.style.colors.ink}
-            strokeWidth={p.style.inkWidth * scale}
-          />
-        )}
+        {/* Trazo en curso y cursor del lápiz: useInk los actualiza directamente. */}
+        <path ref={draftRef} className="ink" />
+        <circle ref={cursorRef} className="pen-cursor" />
         {selected && <rect className="sel-outline" {...xywh(pad(toBox(bounds(selected)), 3))} />}
       </svg>
 
@@ -385,7 +370,6 @@ function textStyle(a: TextAnnot, scale: number): React.CSSProperties {
   };
 }
 
-const round = (n: number) => Math.round(n * 100) / 100;
 const xywh = (b: Box) => ({ x: b.left, y: b.top, width: b.width, height: b.height });
 const pad = (b: Box, n: number): Box => ({
   left: b.left - n,
@@ -393,5 +377,221 @@ const pad = (b: Box, n: number): Box => ({
   width: b.width + 2 * n,
   height: b.height + 2 * n,
 });
-const pathD = (pts: Point[]) =>
-  pts.map(([x, y], i) => `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`).join(" ");
+
+/** Radio de la goma en pantalla (px). */
+const ERASER_PX = 7;
+
+/**
+ * Dibujo a mano alzada sobre una página, con ratón, dedo o lápiz.
+ * El lápiz dibuja con cualquier herramienta (si `penDraws`), borra con la goma o el botón
+ * lateral y, mientras está cerca de la pantalla, impide que el dedo o la palma desplacen.
+ * Escucha en el div de la página (fase de captura) para recibir el lápiz aunque la capa
+ * no reciba clics con las herramientas de selección.
+ */
+function useInk(
+  rootRef: React.RefObject<HTMLDivElement | null>,
+  draftRef: React.RefObject<SVGPathElement | null>,
+  cursorRef: React.RefObject<SVGCircleElement | null>,
+  latest: { readonly current: Props },
+) {
+  useEffect(() => {
+    const root = rootRef.current!;
+    const page = root.closest<HTMLElement>(".page");
+    if (!page) return;
+    const draft = draftRef.current!;
+    const cursor = cursorRef.current!;
+
+    let stroke: { pointer: number; erase: boolean; pts: Point[]; start: number } | null = null;
+    // Trazos que la goma ya ha quitado en este gesto (las props aún no se han actualizado).
+    let erased = new Map<string, Point[][] | null>();
+    let frame = 0;
+
+    const toPdf = (e: { clientX: number; clientY: number }, box: DOMRect): Point =>
+      latest.current.viewport.convertToPdfPoint(e.clientX - box.left, e.clientY - box.top) as Point;
+    const toView = ([x, y]: Point) => latest.current.viewport.convertToViewportPoint(x, y) as Point;
+    const penDraws = () => latest.current.style.penDraws || latest.current.tool === "ink";
+
+    const modeFor = (e: PointerEvent): "draw" | "erase" | null => {
+      const q = latest.current;
+      const target = e.target as Element;
+      if (target.closest(".text-editor")) return null;
+      if (e.pointerType === "pen") {
+        markPenSeen();
+        if (e.buttons & 32) return "erase";
+        if (!penDraws()) return null;
+        if (e.buttons & ERASER_BUTTONS) return "erase";
+        // Un toque con el lápiz sobre una anotación la selecciona, como con el ratón.
+        if (q.tool === "select" && target.closest("[data-annot-id]")) return null;
+        return e.button === 0 ? "draw" : null;
+      }
+      if (q.tool !== "ink" || e.button !== 0) return null;
+      if (e.pointerType === "touch" && penSeen()) return null;
+      return "draw";
+    };
+
+    const showCursor = (e: PointerEvent, erase: boolean) => {
+      const box = root.getBoundingClientRect();
+      const s = latest.current.style;
+      const r = erase ? ERASER_PX : Math.max(1.5, (s.inkWidth * latest.current.viewport.scale) / 2);
+      cursor.setAttribute("cx", String(e.clientX - box.left));
+      cursor.setAttribute("cy", String(e.clientY - box.top));
+      cursor.setAttribute("r", String(r));
+      cursor.style.fill = erase ? "none" : s.colors.ink;
+      cursor.classList.toggle("erase", erase);
+      cursor.style.display = "block";
+      page.classList.add("no-cursor");
+    };
+    const hideCursor = () => {
+      cursor.style.display = "none";
+      page.classList.remove("no-cursor");
+    };
+
+    const render = () => {
+      frame = 0;
+      if (stroke && !stroke.erase) draft.setAttribute("d", smoothPathD(stroke.pts.map(toView)));
+    };
+
+    const eraseAt = (pt: Point) => {
+      const q = latest.current;
+      const tol = ERASER_PX / q.viewport.scale;
+      for (const a of [...q.annots].reverse()) {
+        if (a.kind !== "ink") continue;
+        const strokes = erased.has(a.id) ? erased.get(a.id) : a.strokes;
+        if (!strokes) continue;
+        const i = strokeAt({ ...a, strokes }, pt, tol);
+        if (i < 0) continue;
+        const rest = strokes.filter((_, j) => j !== i);
+        erased.set(a.id, rest.length ? rest : null);
+        if (rest.length) {
+          q.onBegin();
+          q.onChange(a.id, { strokes: rest });
+        } else q.onDelete(a.id);
+        return;
+      }
+    };
+
+    const onDown = (e: PointerEvent) => {
+      const mode = modeFor(e);
+      if (!mode) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const active = document.activeElement as HTMLElement | null;
+      if (active?.classList.contains("text-editor")) active.blur();
+      try {
+        page.setPointerCapture(e.pointerId);
+      } catch {
+        /* el puntero ya no está activo: se dibuja igual mientras siga sobre la página */
+      }
+      const pt = toPdf(e, root.getBoundingClientRect());
+      stroke = { pointer: e.pointerId, erase: mode === "erase", pts: [pt], start: Date.now() };
+      if (mode === "erase") {
+        erased = new Map();
+        eraseAt(pt);
+      } else {
+        const s = latest.current.style;
+        draft.style.stroke = s.colors.ink;
+        draft.style.strokeWidth = String(s.inkWidth * latest.current.viewport.scale);
+        render();
+      }
+      if (e.pointerType === "pen") showCursor(e, mode === "erase");
+      else hideCursor();
+    };
+
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerType === "pen") {
+        markPenSeen();
+        page.classList.add("pen-near");
+      } else if (e.pointerType === "mouse") page.classList.remove("pen-near");
+      if (stroke && e.pointerId === stroke.pointer) {
+        const box = root.getBoundingClientRect();
+        const scale = latest.current.viewport.scale;
+        // El lápiz manda más muestras de las que llegan por fotograma: se usan todas.
+        const samples = e.getCoalescedEvents?.() ?? [];
+        for (const ev of samples.length ? samples : [e]) {
+          const pt = toPdf(ev, box);
+          if (stroke.erase) eraseAt(pt);
+          else {
+            const last = stroke.pts[stroke.pts.length - 1];
+            if (Math.hypot(pt[0] - last[0], pt[1] - last[1]) * scale >= 0.75) stroke.pts.push(pt);
+          }
+        }
+        if (!frame) frame = requestAnimationFrame(render);
+        if (e.pointerType === "pen") showCursor(e, stroke.erase);
+        return;
+      }
+      // Lápiz cerca de la pantalla sin tocarla: vista previa del trazo o de la goma.
+      if (e.pointerType === "pen" && e.buttons & 32) showCursor(e, true);
+      else if (e.pointerType === "pen" && !e.buttons && penDraws()) showCursor(e, false);
+      else hideCursor();
+    };
+
+    const onUp = (e: PointerEvent) => {
+      if (!stroke || e.pointerId !== stroke.pointer) return;
+      const done = stroke;
+      stroke = null;
+      cancelAnimationFrame(frame);
+      frame = 0;
+      draft.removeAttribute("d");
+      if (e.pointerType !== "pen") hideCursor();
+      if (done.erase) return;
+      const q = latest.current;
+      // Un toque sin moverse solo deja un punto con el lápiz (los puntos de la i).
+      if (done.pts.length < 2 && e.pointerType !== "pen") return;
+      const pts = finishStroke(done.pts, 0.35 / q.viewport.scale);
+      // Trazos seguidos y cercanos van a la misma anotación: una palabra se mueve o borra entera.
+      const prev =
+        lastInk.page === q.page && done.start - lastInk.at < GROUP_MS
+          ? q.annots.find((a) => a.id === lastInk.id)
+          : undefined;
+      lastInk.page = q.page;
+      lastInk.at = Date.now();
+      if (
+        prev?.kind === "ink" &&
+        prev.color === q.style.colors.ink &&
+        prev.width === q.style.inkWidth &&
+        distToInk(prev, pts[0]) < GROUP_GAP
+      ) {
+        q.onBegin();
+        q.onChange(prev.id, { strokes: [...prev.strokes, pts] });
+        return;
+      }
+      lastInk.id = newId();
+      q.onCreate({
+        id: lastInk.id,
+        kind: "ink",
+        page: q.page,
+        color: q.style.colors.ink,
+        width: q.style.inkWidth,
+        strokes: [pts],
+        date: pdfDate(),
+      });
+    };
+
+    const onLeave = (e: PointerEvent) => {
+      if (e.pointerType !== "pen" || stroke) return;
+      page.classList.remove("pen-near");
+      hideCursor();
+    };
+    // Mientras se dibuja no se selecciona el texto de debajo.
+    const onSelectStart = (e: Event) => {
+      if (stroke) e.preventDefault();
+    };
+
+    page.addEventListener("pointerdown", onDown, true);
+    page.addEventListener("pointermove", onMove);
+    page.addEventListener("pointerup", onUp);
+    page.addEventListener("pointercancel", onUp);
+    page.addEventListener("pointerleave", onLeave);
+    document.addEventListener("selectstart", onSelectStart);
+    return () => {
+      cancelAnimationFrame(frame);
+      page.removeEventListener("pointerdown", onDown, true);
+      page.removeEventListener("pointermove", onMove);
+      page.removeEventListener("pointerup", onUp);
+      page.removeEventListener("pointercancel", onUp);
+      page.removeEventListener("pointerleave", onLeave);
+      document.removeEventListener("selectstart", onSelectStart);
+      page.classList.remove("pen-near", "no-cursor");
+    };
+  }, [rootRef, draftRef, cursorRef, latest]);
+}

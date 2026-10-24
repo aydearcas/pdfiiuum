@@ -841,6 +841,29 @@ button {
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+/* Vista previa del lápiz cerca de la pantalla: punto del color y grosor del trazo, o la goma. */
+.annot-svg .pen-cursor {
+  display: none;
+  stroke: rgba(255, 255, 255, 0.9);
+  stroke-width: 1;
+}
+.annot-svg .pen-cursor.erase {
+  stroke: #333;
+  stroke-width: 1.5;
+  stroke-dasharray: 2 2;
+}
+.page.no-cursor,
+.page.no-cursor * {
+  cursor: none !important;
+}
+/* Con el lápiz cerca, ni el lápiz ni la palma desplazan la página: el dedo vuelve a hacerlo al alejarlo. */
+.page.pen-near {
+  touch-action: none;
+}
+/* Sin lápiz, el dedo dibuja con la herramienta Dibujo; desde que se usa uno, el dedo desplaza. */
+body:not(.pen-seen) .annot-layer.creating.tool-ink {
+  touch-action: none;
+}
 .annot-svg .ink-hit {
   fill: none;
   stroke: transparent;
@@ -1276,6 +1299,18 @@ button {
 .chip.active {
   border-color: var(--accent);
   background: var(--accent-soft);
+}
+.option-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.option-check input {
+  accent-color: var(--accent);
 }
 .stroke-sample {
   display: block;
