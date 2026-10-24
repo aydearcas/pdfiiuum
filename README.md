@@ -91,6 +91,7 @@ Cierra y vuelve a abrir la terminal después de instalar Rust. También hace fal
 | `npm run tauri dev` | App de escritorio en modo desarrollo |
 | `npm run release` | Genera el instalador en `src-tauri/target/release/bundle/nsis/` sin rutas del equipo dentro del ejecutable (úsalo para publicar) |
 | `npm run tauri build` | Igual, pero el ejecutable conserva las rutas locales de compilación |
+| `node scripts/update-pdfium.mjs` | Comprueba si hay una PDFium más nueva (hazlo antes de publicar: cada versión corrige fallos de seguridad). Con un número (`… 8200`) la descarga, comprueba su SHA-256 y sustituye `src-tauri/lib/pdfium.dll` |
 | `npx tauri icon ruta/al/icono.png` | Regenera todos los iconos (PNG de 1024×1024) |
 | `powershell -File scripts\render-docs.ps1` | Regenera las imágenes del manual (`docs/*.png`) desde `docs/manual/*.html` con Edge |
 
