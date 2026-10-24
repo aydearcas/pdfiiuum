@@ -188,15 +188,16 @@ async fn save_annotated(request: Request<'_>, pdfium: tauri::State<'_, PdfiumPat
     .map_err(|e| e.to_string())?
 }
 
-/// Cuerpo: el PDF. Respuesta: [longitud (u32 LE)][JSON de anotaciones editables][PDF para
-/// mostrar, sin esas anotaciones; vacío si no había ninguna].
+/// Cuerpo: el PDF. Respuesta: [longitud (u32 LE)][JSON {annots: anotaciones editables, signed}]
+/// [PDF para mostrar, sin esas anotaciones; vacío si no había ninguna].
 #[tauri::command]
 async fn extract_annotations(request: Request<'_>, pdfium: tauri::State<'_, PdfiumPath>) -> Result<Response, String> {
     let pdf = raw_body(&request)?.to_vec();
     let dll = pdfium.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let ex = pdf_engine::extract_annotations(&dll, &pdf)?;
-        let json = serde_json::to_vec(&ex.annots).map_err(|e| e.to_string())?;
+        let json = serde_json::to_vec(&serde_json::json!({ "annots": ex.annots, "signed": ex.signed }))
+            .map_err(|e| e.to_string())?;
         Ok(Response::new(framed(&json, ex.display.as_deref().unwrap_or(&[]))))
     })
     .await

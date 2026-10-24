@@ -159,17 +159,23 @@ function framed(data: unknown, bin: Uint8Array): Uint8Array {
   return body;
 }
 
+/** Respuesta de PDFium; un puente de una versión anterior devuelve solo la lista. */
+type ExtractedJson = NativeExisting[] | { annots: NativeExisting[]; signed: boolean };
+const extractedParts = (r: ExtractedJson) => (Array.isArray(r) ? { annots: r, signed: false } : r);
+
 /**
- * Anotaciones que ya contiene el PDF (leídas con PDFium) y una copia del PDF sin ellas
- * para mostrarla (null si no había ninguna).
+ * Anotaciones que ya contiene el PDF (leídas con PDFium), una copia del PDF sin ellas para
+ * mostrarla (null si no había ninguna) y si tiene firma digital.
  */
-export async function extractAnnotations(pdf: Uint8Array): Promise<{ annots: NativeExisting[]; display: Uint8Array | null }> {
+export async function extractAnnotations(
+  pdf: Uint8Array,
+): Promise<{ annots: NativeExisting[]; display: Uint8Array | null; signed: boolean }> {
   if (isExtension) {
-    const r = await call<NativeExisting[]>("extract_annotations", null, pdf);
-    return { annots: r.result, display: r.bytes };
+    const r = await call<ExtractedJson>("extract_annotations", null, pdf);
+    return { ...extractedParts(r.result), display: r.bytes };
   }
-  const [annots, display] = unframe<NativeExisting[]>(await invoke<ArrayBuffer>("extract_annotations", pdf));
-  return { annots, display: display.length ? display : null };
+  const [json, display] = unframe<ExtractedJson>(await invoke<ArrayBuffer>("extract_annotations", pdf));
+  return { ...extractedParts(json), display: display.length ? display : null };
 }
 
 /** Inverso de `framed`: el JSON ya interpretado y el binario. */
@@ -311,15 +317,14 @@ export async function openExternal(url: string): Promise<void> {
   if (ok) await invoke("open_external", { url });
 }
 
-/** Pregunta Sí/No con el diálogo nativo (o confirm() en el navegador). */
-export async function confirmDiscard(message: string): Promise<boolean> {
+/** Pregunta Sí/No antes de una acción con consecuencias (diálogo nativo, o confirm() en el navegador). */
+export async function confirmAction(message: string, okLabel: string): Promise<boolean> {
   if (!isTauri) return window.confirm(message);
-  return ask(message, {
-    title: "pdfiiuum",
-    kind: "warning",
-    okLabel: "Descartar cambios",
-    cancelLabel: "Cancelar",
-  });
+  return ask(message, { title: "pdfiiuum", kind: "warning", okLabel, cancelLabel: "Cancelar" });
+}
+
+export function confirmDiscard(message: string): Promise<boolean> {
+  return confirmAction(message, "Descartar cambios");
 }
 
 /** Avisa antes de cerrar la ventana si hay cambios sin guardar. */

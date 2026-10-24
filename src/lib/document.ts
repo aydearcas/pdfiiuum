@@ -13,6 +13,8 @@ export interface OpenedDocument {
    * poder editarlas, hasta que el usuario empieza a anotar, editar o guardar.
    */
   deferred: boolean;
+  /** Tiene firma digital: PDFium lo guarda de forma incremental para no invalidarla. */
+  signed: boolean;
 }
 
 /**
@@ -25,7 +27,7 @@ export async function openDocument(bytes: Uint8Array, { defer = false } = {}): P
   const extracted = hasPdfium && !defer ? await extractAnnotations(bytes).catch(() => null) : null;
   const pdf = await loadPdf(extracted?.display ?? bytes);
   const baseline = extracted ? await withQuotes(pdf, extracted.annots.map(fromNative)) : [];
-  return { pdf, baseline, deferred };
+  return { pdf, baseline, deferred, signed: extracted?.signed ?? false };
 }
 
 interface TextItem {

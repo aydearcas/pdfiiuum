@@ -16,6 +16,7 @@ import { useAnnotations } from "../lib/useAnnotations";
 import {
   bakeAnnotations,
   baseName,
+  confirmAction,
   downloadPdf,
   editPage,
   editPages,
@@ -41,6 +42,8 @@ export interface TabInit {
   baseline: Annot[];
   /** Visor del navegador: las anotaciones del PDF aún no se han leído con PDFium (ver `openDocument`). */
   deferred?: boolean;
+  /** Tiene firma digital (se sabe al leer las anotaciones con PDFium). */
+  signed?: boolean;
   /** Estado de las anotaciones traído de otra ventana (incluye cambios sin guardar). */
   annots?: Annot[];
   view?: ViewState;
@@ -228,6 +231,24 @@ export default function DocTab(p: Props) {
   useEffect(() => {
     if (doc.deferred && (annots.length > 0 || (active && tool !== "select" && tool !== "hand"))) loadExisting();
   }, [doc.deferred, annots.length, active, tool, loadExisting]);
+
+  // PDF con firma digital: se guarda de forma incremental, así que anotar no la invalida; se avisa
+  // una vez, y otra antes de cambiar el contenido, que sí la deja como «modificada después de firmar».
+  const signedNotice = useRef(false);
+  useEffect(() => {
+    if (!doc.signed || signedNotice.current) return;
+    signedNotice.current = true;
+    notify("Este PDF tiene firma digital: los cambios se guardan detrás de lo firmado, sin invalidar la firma.");
+  }, [doc.signed, notify]);
+  const signedEditOk = useRef(false);
+  const confirmSignedEdit = useCallback(async () => {
+    if (!docRef.current.signed || signedEditOk.current) return true;
+    signedEditOk.current = await confirmAction(
+      "Este PDF tiene firma digital. Si cambias su contenido, la firma aparecerá como «modificada después de firmar» (lo firmado no se pierde). ¿Quieres editarlo?",
+      "Editar igualmente",
+    );
+    return signedEditOk.current;
+  }, []);
 
   // Al cambiar de PDF (guardar, corregir texto, deshacer) se libera el anterior cuando
   // el visor y las miniaturas ya muestran el nuevo.
@@ -433,6 +454,7 @@ export default function DocTab(p: Props) {
       editBusy.current = true;
       try {
         await ensureEditable();
+        if (!(await confirmSignedEdit())) return false;
         const before = docRef.current.bytes;
         const result = await editPage(before, n, change);
         await showBytes(result.bytes);
@@ -446,7 +468,7 @@ export default function DocTab(p: Props) {
         editBusy.current = false;
       }
     },
-    [showBytes, notify, ensureEditable],
+    [showBytes, notify, ensureEditable, confirmSignedEdit],
   );
 
   /** Imagen elegida por el usuario, en el centro de la página actual y como mucho al 60 %. */
@@ -504,6 +526,7 @@ export default function DocTab(p: Props) {
       editBusy.current = true;
       try {
         await ensureEditable();
+        if (!(await confirmSignedEdit())) return;
         const d = docRef.current;
         const { remove, add, dirty: pending } = changesRef.current;
         const base = pending ? await bakeAnnotations(d.bytes, { remove, add: add.map(toNative) }) : d.bytes;
@@ -516,7 +539,7 @@ export default function DocTab(p: Props) {
         editBusy.current = false;
       }
     },
-    [showBytes, notify, ensureEditable],
+    [showBytes, notify, ensureEditable, confirmSignedEdit],
   );
 
   const pageCount = doc.pdf.numPages;

@@ -20,6 +20,7 @@ const ANNOT_INK: c_int = 15;
 const COLORTYPE_COLOR: u32 = 0;
 const ANNOT_FLAG_PRINT: c_int = 4;
 const RENDER_ANNOT: c_int = 0x01;
+const SAVE_INCREMENTAL: u32 = 1;
 const SAVE_NO_INCREMENTAL: u32 = 2;
 
 /// Prefijo del campo NM con el que identificamos el texto insertado por la app.
@@ -179,6 +180,8 @@ pub struct Extracted {
     /// Copia del PDF sin esas anotaciones (la app las dibuja en su capa editable);
     /// None si no había ninguna.
     pub display: Option<Vec<u8>>,
+    /// Tiene firma digital: se guarda de forma incremental (ver `save`).
+    pub signed: bool,
 }
 
 const ANNOT_FLAG_HIDDEN: c_int = 2;
@@ -215,7 +218,7 @@ pub fn extract_annotations(dll: &Path, pdf: &[u8]) -> Result<Extracted, String> 
                 b.FPDF_ClosePage(page);
             }
             let display = if annots.is_empty() { None } else { Some(save(b, doc)?) };
-            Ok(Extracted { annots, display })
+            Ok(Extracted { annots, display, signed: b.FPDF_GetSignatureCount(doc) > 0 })
         })();
         b.FPDF_CloseDocument(doc);
         result
@@ -509,6 +512,48 @@ unsafe extern "C" fn write_block(this: *mut FPDF_FILEWRITE, data: *const c_void,
 mod tests {
     use super::*;
 
+    /// PDF con un campo de firma rellenado. No lleva criptografía real: a PDFium le basta el
+    /// diccionario /Sig para contarlo como firmado.
+    fn signed_sample() -> Vec<u8> {
+        let objects = [
+            "<</Type/Catalog/Pages 2 0 R/AcroForm<</Fields[4 0 R]/SigFlags 3>>>>",
+            "<</Type/Pages/Kids[3 0 R]/Count 1>>",
+            "<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 300]/Annots[4 0 R]>>",
+            "<</Type/Annot/Subtype/Widget/FT/Sig/T(Firma)/Rect[0 0 0 0]/P 3 0 R/V 5 0 R>>",
+            "<</Type/Sig/Filter/Adobe.PPKLite/SubFilter/adbe.pkcs7.detached/ByteRange[0 0 0 0]/Contents<00>>>",
+        ];
+        let mut out = b"%PDF-1.7\n".to_vec();
+        let mut offsets = Vec::new();
+        for (i, o) in objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+        }
+        let xref = out.len();
+        out.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+        for off in offsets {
+            out.extend(format!("{off:010} 00000 n \n").as_bytes());
+        }
+        out.extend(format!("trailer\n<</Size {}/Root 1 0 R>>\nstartxref\n{xref}\n%%EOF\n", objects.len() + 1).as_bytes());
+        out
+    }
+
+    #[test]
+    fn signed_pdfs_are_saved_incrementally() {
+        let dll = Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/pdfium.dll");
+        let pdf = signed_sample();
+        assert!(extract_annotations(&dll, &pdf).unwrap().signed);
+        let annot: Annot =
+            serde_json::from_str(r#"{"kind":"highlight","page":0,"color":[255,212,0],"rects":[[50,100,200,120]]}"#).unwrap();
+        let out = apply_annotations(&dll, &pdf, &[], &[annot]).unwrap();
+        // Lo firmado sigue intacto al principio del archivo y la anotación va detrás.
+        assert!(out.len() > pdf.len() && out.starts_with(&pdf));
+        let again = extract_annotations(&dll, &out).unwrap();
+        assert!(again.signed);
+        assert_eq!(again.annots.len(), 1);
+        // Sin firma, el guardado sigue siendo el de siempre.
+        assert!(!extract_annotations(&dll, &crate::pdf_pages::tests_sample()).unwrap().signed);
+    }
+
     /// PDFIIUUM_TEST_IN=entrada.pdf PDFIIUUM_TEST_OUT=salida.pdf cargo test -- --nocapture
     #[test]
     fn writes_every_kind() {
@@ -549,12 +594,16 @@ mod tests {
     }
 }
 
+/// Con firmas digitales se guarda de forma incremental: los cambios se añaden detrás y los bytes
+/// firmados quedan intactos, así que la firma sigue siendo válida para su versión (los lectores
+/// indican «modificado después de firmar»). Sin firmas, el archivo se reescribe entero.
 pub(crate) unsafe fn save(b: &Bindings, doc: FPDF_DOCUMENT) -> Result<Vec<u8>, String> {
     let mut writer = Writer {
         base: FPDF_FILEWRITE { version: 1, WriteBlock: Some(write_block) },
         out: Vec::new(),
     };
-    let ok = b.FPDF_SaveAsCopy(doc, &mut writer as *mut Writer as *mut FPDF_FILEWRITE, SAVE_NO_INCREMENTAL as FPDF_DWORD);
+    let flags = if b.FPDF_GetSignatureCount(doc) > 0 { SAVE_INCREMENTAL } else { SAVE_NO_INCREMENTAL };
+    let ok = b.FPDF_SaveAsCopy(doc, &mut writer as *mut Writer as *mut FPDF_FILEWRITE, flags as FPDF_DWORD);
     if ok == 0 {
         return Err("PDFium no pudo guardar el documento".into());
     }

@@ -147,11 +147,11 @@ export default function App() {
       try {
         // Las anotaciones que ya tiene el PDF pasan a la capa editable (en el visor del
         // navegador, cuando el usuario empieza a anotar o editar).
-        const { pdf, baseline, deferred } = await openDocument(file.bytes, { defer: isExtension });
+        const { pdf, baseline, deferred, signed } = await openDocument(file.bytes, { defer: isExtension });
         const id = newTabId();
         setTabs((all) => [
           ...all,
-          { id, init: { pdf, baseline, deferred, bytes: file.bytes, name: file.name, path: file.path, ...extra } },
+          { id, init: { pdf, baseline, deferred, signed, bytes: file.bytes, name: file.name, path: file.path, ...extra } },
         ]);
         setActiveId(id);
       } catch (e) {

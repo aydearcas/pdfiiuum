@@ -175,7 +175,7 @@ fn call(dll: &Path, current: &[u8], cmd: &str, args: Value) -> Result<(Value, Op
         "user_name" => Ok((json!(pdf_engine::default_author()), None, false)),
         "extract_annotations" => {
             let ex = pdf_engine::extract_annotations(dll, current)?;
-            Ok((serde_json::to_value(&ex.annots).map_err(|e| e.to_string())?, ex.display, false))
+            Ok((json!({ "annots": ex.annots, "signed": ex.signed }), ex.display, false))
         }
         "page_content" => {
             let Page { page } = arg(args)?;
@@ -416,6 +416,7 @@ mod tests {
         input.extend(frame(json!({ "type": "call", "id": 2, "cmd": "edit_pages", "args": { "op": "delete", "pages": [1] } })));
         input.extend(frame(json!({ "type": "call", "id": 3, "cmd": "extract_pages", "args": [0] })));
         input.extend(frame(json!({ "type": "call", "id": 4, "cmd": "nada" })));
+        input.extend(frame(json!({ "type": "call", "id": 5, "cmd": "extract_annotations" })));
         let mut reader = input.as_slice();
         let first = read_message(&mut reader).unwrap().unwrap();
         let mut out = Vec::new();
@@ -436,6 +437,9 @@ mod tests {
         assert!(rebuilt.starts_with(b"%PDF"));
         assert_eq!(result(3)["current"], false);
         assert_eq!(result(4)["type"], "error");
+        // El visor del navegador recibe las anotaciones y si el PDF está firmado.
+        assert!(result(5)["result"]["annots"].is_array());
+        assert_eq!(result(5)["result"]["signed"], false);
     }
 
     #[test]
