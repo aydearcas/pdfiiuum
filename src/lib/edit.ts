@@ -18,6 +18,34 @@ export interface TextRun {
   color: [number, number, number];
 }
 
+export interface ImageObject {
+  index: number;
+  rect: Rect;
+}
+
+/** Lo que se puede editar en una página. */
+export interface PageContent {
+  runs: TextRun[];
+  images: ImageObject[];
+}
+
+export type EditFont = "sans" | "serif" | "mono";
+
+/** Cambio en una página (coordenadas PDF); lo aplica `edit_page` en Rust. */
+export type PageEdit =
+  | { op: "text"; objects: number[]; text: string }
+  | { op: "addText"; x: number; y: number; text: string; size: number; color: [number, number, number]; font: EditFont }
+  | { op: "move"; index: number; rect: Rect }
+  | { op: "delete"; indices: number[] }
+  | { op: "addImage"; path: string; center: [number, number]; max: [number, number] }
+  | { op: "cover"; rect: Rect };
+
+export const EDIT_FONTS: { font: EditFont; label: string; css: string }[] = [
+  { font: "sans", label: "Sans", css: "Helvetica, Arial, sans-serif" },
+  { font: "serif", label: "Serif", css: '"Times New Roman", Times, serif' },
+  { font: "mono", label: "Mono", css: '"Courier New", Courier, monospace' },
+];
+
 /** Tipografía CSS más parecida a la del tramo (la suya si está instalada en Windows). */
 export function cssFont(run: TextRun, px: number): string {
   const generic = run.mono ? "monospace" : run.serif ? "serif" : "sans-serif";

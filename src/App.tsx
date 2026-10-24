@@ -411,7 +411,14 @@ export default function App() {
         onSearch={() => active?.toggleSearch()}
       />
       <div className="body">
-        <ToolRail tool={tool} style={toolStyle} disabled={!status} onTool={setTool} onStyle={setToolStyle} />
+        <ToolRail
+          tool={tool}
+          style={toolStyle}
+          disabled={!status}
+          onTool={setTool}
+          onStyle={setToolStyle}
+          onInsertImage={() => activeId && handles.current.get(activeId)?.insertImage()}
+        />
         <div className="docs">
           {tabs.map((t) => (
             <DocTab

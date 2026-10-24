@@ -56,6 +56,9 @@ El icono muestra ✓ cuando el PDF se ha abierto y ! si algo ha fallado (al pasa
 - Lápiz digital: dibuja con cualquier herramienta, borra con la goma o el botón lateral y agrupa los trazos de cada palabra.
 - Extensión del navegador «Abrir en pdfiiuum».
 - Modo edición (solo escritorio): **Corregir texto** (E) reescribe una línea del PDF con su tipografía, tamaño, color y posición. Si la tipografía incrustada no tiene alguna letra, esa letra se escribe con una parecida (Helvetica, Times, Courier o, para otros alfabetos, Arial, Times New Roman o Courier New) y se avisa. No recoloca el párrafo, no edita texto girado ni escaneado.
+  - **Añadir texto al PDF** como contenido (no como anotación), en Sans, Serif o Mono, con el color y el tamaño de la herramienta de texto.
+  - **Insertar imagen** (PNG, JPEG, GIF, BMP o WebP; el JPEG va sin recomprimir) y **mover, cambiar el tamaño o borrar imágenes** del PDF.
+  - **Tapar una zona**: rectángulo blanco que además quita el texto y las imágenes que quedan enteros debajo (lo que queda tapado solo en parte sigue en el PDF: no es un borrado seguro).
 
 ## Tecnología
 

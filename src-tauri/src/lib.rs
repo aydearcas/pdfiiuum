@@ -131,33 +131,32 @@ fn page_header(request: &Request<'_>) -> Result<i32, String> {
         .ok_or_else(|| "Falta la página".to_string())
 }
 
-/// Modo edición. Cuerpo: el PDF; cabecera `page` (desde 0). Respuesta: tramos de texto editables.
+/// Modo edición. Cuerpo: el PDF; cabecera `page` (desde 0). Respuesta: tramos de texto e imágenes.
 #[tauri::command]
-async fn text_runs(request: Request<'_>, pdfium: tauri::State<'_, PdfiumPath>) -> Result<Vec<pdf_edit::TextRun>, String> {
+async fn page_content(request: Request<'_>, pdfium: tauri::State<'_, PdfiumPath>) -> Result<pdf_edit::PageContent, String> {
     let page = page_header(&request)?;
     let pdf = raw_body(&request)?.to_vec();
     let dll = pdfium.0.clone();
-    tauri::async_runtime::spawn_blocking(move || pdf_edit::text_runs(&dll, &pdf, page))
+    tauri::async_runtime::spawn_blocking(move || pdf_edit::page_content(&dll, &pdf, page))
         .await
         .map_err(|e| e.to_string())?
 }
 
 #[derive(serde::Deserialize)]
-struct EditTextRequest {
+struct EditPageRequest {
     page: i32,
-    objects: Vec<i32>,
-    text: String,
+    edit: pdf_edit::PageEdit,
 }
 
-/// Cuerpo: [JSON {page, objects, text}][PDF]. Respuesta: [JSON {notice}][PDF editado].
+/// Cuerpo: [JSON {page, edit}][PDF]. Respuesta: [JSON {notice}][PDF editado].
 #[tauri::command]
-async fn edit_text(request: Request<'_>, pdfium: tauri::State<'_, PdfiumPath>) -> Result<Response, String> {
+async fn edit_page(request: Request<'_>, pdfium: tauri::State<'_, PdfiumPath>) -> Result<Response, String> {
     let (json, pdf) = split_framed(raw_body(&request)?)?;
-    let req: EditTextRequest = serde_json::from_slice(json).map_err(|e| e.to_string())?;
+    let req: EditPageRequest = serde_json::from_slice(json).map_err(|e| e.to_string())?;
     let pdf = pdf.to_vec();
     let dll = pdfium.0.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let out = pdf_edit::edit_text(&dll, &pdf, req.page, &req.objects, &req.text)?;
+        let out = pdf_edit::edit_page(&dll, &pdf, req.page, &req.edit)?;
         let json = serde_json::to_vec(&serde_json::json!({ "notice": out.notice })).map_err(|e| e.to_string())?;
         Ok(Response::new(framed(&json, &out.pdf)))
     })
@@ -227,8 +226,8 @@ pub fn run() {
             write_pdf,
             save_annotated,
             extract_annotations,
-            text_runs,
-            edit_text,
+            page_content,
+            edit_page,
             user_name,
             windows::drop_tab,
             windows::take_window_payload

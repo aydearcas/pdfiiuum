@@ -10,11 +10,14 @@ use std::os::raw::{c_int, c_uint};
 use std::path::Path;
 
 use pdfium_render::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::pdf_engine::{engine, save, wide, Bindings};
 
 const PAGEOBJ_TEXT: c_int = 1;
+const PAGEOBJ_IMAGE: c_int = 3;
+const FILLMODE_ALTERNATE: c_int = 1;
+const BITMAP_BGRA: c_int = 4;
 const TEXTRENDERMODE_FILL: i32 = 0;
 const TEXTRENDERMODE_INVISIBLE: i32 = 3;
 const FONT_TRUETYPE: c_int = 2;
@@ -65,6 +68,37 @@ impl Piece {
     }
 }
 
+/// Imagen de una página.
+#[derive(Serialize, Clone, Debug)]
+pub struct ImageObject {
+    pub index: i32,
+    pub rect: [f32; 4],
+}
+
+/// Lo que se puede editar en una página.
+#[derive(Serialize, Debug)]
+pub struct PageContent {
+    pub runs: Vec<TextRun>,
+    pub images: Vec<ImageObject>,
+}
+
+/// Cambio en el contenido de una página (coordenadas PDF).
+#[derive(Deserialize, Debug)]
+#[serde(tag = "op", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum PageEdit {
+    /// Corregir un tramo de texto (vacío = borrarlo).
+    Text { objects: Vec<i32>, text: String },
+    /// Texto nuevo con la esquina superior izquierda en (x, y). `font`: sans, serif o mono.
+    AddText { x: f32, y: f32, text: String, size: f32, color: [u8; 3], font: String },
+    /// Mover o cambiar de tamaño un objeto para que ocupe `rect`.
+    Move { index: i32, rect: [f32; 4] },
+    Delete { indices: Vec<i32> },
+    /// Imagen de un archivo, centrada en `center` y reducida para caber en `max` (ancho, alto).
+    AddImage { path: String, center: [f32; 2], max: [f32; 2] },
+    /// Rectángulo blanco que tapa la zona; quita lo que quede entero debajo.
+    Cover { rect: [f32; 4] },
+}
+
 pub struct Edited {
     pub pdf: Vec<u8>,
     /// Aviso para el usuario (p. ej., letras escritas con otra tipografía).
@@ -102,36 +136,278 @@ unsafe fn with_page<T>(
     result
 }
 
-/// Tramos de texto editables de una página.
-pub fn text_runs(dll: &Path, pdf: &[u8], page: i32) -> Result<Vec<TextRun>, String> {
+/// Tramos de texto e imágenes de una página.
+pub fn page_content(dll: &Path, pdf: &[u8], page: i32) -> Result<PageContent, String> {
     let guard = engine(dll)?.lock().map_err(|_| "PDFium está bloqueado".to_string())?;
     let b = &*guard;
-    unsafe { with_page(b, pdf, page, |_, page, tp| Ok(group(b, &pieces(b, page, tp)))) }
+    unsafe {
+        with_page(b, pdf, page, |_, page, tp| {
+            Ok(PageContent { runs: group(b, &pieces(b, page, tp)), images: images(b, page) })
+        })
+    }
 }
 
-/// Sustituye el texto del tramo formado por `objects` por `text` (vacío = borrarlo).
-pub fn edit_text(dll: &Path, pdf: &[u8], page: i32, objects: &[i32], text: &str) -> Result<Edited, String> {
+/// Aplica un cambio a la página y devuelve el PDF resultante.
+pub fn edit_page(dll: &Path, pdf: &[u8], page: i32, edit: &PageEdit) -> Result<Edited, String> {
     let guard = engine(dll)?.lock().map_err(|_| "PDFium está bloqueado".to_string())?;
     let b = &*guard;
     unsafe {
         with_page(b, pdf, page, |doc, page, tp| {
-            let all = pieces(b, page, tp);
-            let targets: Vec<&Piece> = objects.iter().filter_map(|i| all.iter().find(|p| p.index == *i)).collect();
-            if targets.len() != objects.len() || targets.is_empty() {
-                return Err("El texto ha cambiado mientras se editaba; vuelve a intentarlo".into());
-            }
-            let notice = if text.trim().is_empty() { None } else { write_run(b, doc, page, &targets, text)? };
-            for t in &targets {
-                if b.FPDFPage_RemoveObject(page, t.obj) != 0 {
-                    b.FPDFPageObj_Destroy(t.obj);
+            let notice = match edit {
+                PageEdit::Text { objects, text } => replace_run(b, doc, page, tp, objects, text)?,
+                PageEdit::AddText { x, y, text, size, color, font } => {
+                    add_text(b, doc, page, [*x, *y], text, *size, *color, font)?
                 }
-            }
+                PageEdit::Move { index, rect } => {
+                    move_object(b, page, *index, *rect)?;
+                    None
+                }
+                PageEdit::Delete { indices } => {
+                    let objs: Vec<FPDF_PAGEOBJECT> = indices.iter().map(|&i| b.FPDFPage_GetObject(page, i)).collect();
+                    if objs.iter().any(|o| o.is_null()) {
+                        return Err(STALE.into());
+                    }
+                    for obj in objs {
+                        remove(b, page, obj);
+                    }
+                    None
+                }
+                PageEdit::AddImage { path, center, max } => {
+                    add_image(b, doc, page, Path::new(path), *center, *max)?;
+                    None
+                }
+                PageEdit::Cover { rect } => cover(b, page, *rect),
+            };
             if b.FPDFPage_GenerateContent(page) == 0 {
                 return Err("PDFium no pudo regenerar la página".into());
             }
             Ok(Edited { pdf: save(b, doc)?, notice })
         })
     }
+}
+
+const STALE: &str = "La página ha cambiado mientras se editaba; vuelve a intentarlo";
+
+unsafe fn remove(b: &Bindings, page: FPDF_PAGE, obj: FPDF_PAGEOBJECT) {
+    if b.FPDFPage_RemoveObject(page, obj) != 0 {
+        b.FPDFPageObj_Destroy(obj);
+    }
+}
+
+unsafe fn bounds(b: &Bindings, obj: FPDF_PAGEOBJECT) -> Option<[f32; 4]> {
+    let (mut l, mut bt, mut r, mut t) = (0.0, 0.0, 0.0, 0.0);
+    (b.FPDFPageObj_GetBounds(obj, &mut l, &mut bt, &mut r, &mut t) != 0).then_some([l, bt, r, t])
+}
+
+fn normalize([x1, y1, x2, y2]: [f32; 4]) -> [f32; 4] {
+    [x1.min(x2), y1.min(y2), x1.max(x2), y1.max(y2)]
+}
+
+/// Sustituye el texto del tramo formado por `objects` por `text` (vacío = borrarlo).
+unsafe fn replace_run(
+    b: &Bindings,
+    doc: FPDF_DOCUMENT,
+    page: FPDF_PAGE,
+    tp: FPDF_TEXTPAGE,
+    objects: &[i32],
+    text: &str,
+) -> Result<Option<String>, String> {
+    let all = pieces(b, page, tp);
+    let targets: Vec<&Piece> = objects.iter().filter_map(|i| all.iter().find(|p| p.index == *i)).collect();
+    if targets.len() != objects.len() || targets.is_empty() {
+        return Err(STALE.into());
+    }
+    let notice = if text.trim().is_empty() { None } else { write_run(b, doc, page, &targets, text)? };
+    for t in &targets {
+        remove(b, page, t.obj);
+    }
+    Ok(notice)
+}
+
+unsafe fn images(b: &Bindings, page: FPDF_PAGE) -> Vec<ImageObject> {
+    (0..b.FPDFPage_CountObjects(page))
+        .filter_map(|index| {
+            let obj = b.FPDFPage_GetObject(page, index);
+            if obj.is_null() || b.FPDFPageObj_GetType(obj) != PAGEOBJ_IMAGE {
+                return None;
+            }
+            Some(ImageObject { index, rect: bounds(b, obj)? })
+        })
+        .collect()
+}
+
+/// Escala y desplaza el objeto para que su caja pase a ser `rect`.
+unsafe fn move_object(b: &Bindings, page: FPDF_PAGE, index: i32, rect: [f32; 4]) -> Result<(), String> {
+    let obj = b.FPDFPage_GetObject(page, index);
+    let old = if obj.is_null() { None } else { bounds(b, obj) }.ok_or(STALE)?;
+    let new = normalize(rect);
+    let (ow, oh) = (old[2] - old[0], old[3] - old[1]);
+    if ow <= 0.0 || oh <= 0.0 || new[2] - new[0] < 1.0 || new[3] - new[1] < 1.0 {
+        return Err("Tamaño no válido".into());
+    }
+    let sx = (new[2] - new[0]) / ow;
+    let sy = (new[3] - new[1]) / oh;
+    b.FPDFPageObj_Transform(
+        obj,
+        sx as f64,
+        0.0,
+        0.0,
+        sy as f64,
+        (new[0] - sx * old[0]) as f64,
+        (new[1] - sy * old[1]) as f64,
+    );
+    Ok(())
+}
+
+/// Texto nuevo como contenido de la página, una línea por objeto.
+#[allow(clippy::too_many_arguments)]
+unsafe fn add_text(
+    b: &Bindings,
+    doc: FPDF_DOCUMENT,
+    page: FPDF_PAGE,
+    [x, top]: [f32; 2],
+    text: &str,
+    size: f32,
+    [r, g, bl]: [u8; 3],
+    font: &str,
+) -> Result<Option<String>, String> {
+    let style = FontStyle::generic(font == "serif", font == "mono");
+    let handle = if text.chars().all(|c| win_ansi(c) || c == '\n') {
+        b.FPDFText_LoadStandardFont(doc, style.standard())
+    } else {
+        load_system_font(b, doc, &style)?
+    };
+    if handle.is_null() {
+        return Err("No se pudo cargar la tipografía".into());
+    }
+    // Como el editor: interlineado 1,2 y la primera línea base a 0,95 del tamaño.
+    let mut baseline = top - size * 0.95;
+    for line in text.lines() {
+        if !line.trim().is_empty() {
+            let obj = b.FPDFPageObj_CreateTextObj(doc, handle, size);
+            if obj.is_null() {
+                return Err("No se pudo crear el texto".into());
+            }
+            let w = wide(b, line);
+            b.FPDFText_SetText(obj, w.as_ptr() as FPDF_WIDESTRING);
+            b.FPDFPageObj_SetFillColor(obj, r as _, g as _, bl as _, 255);
+            b.FPDFPageObj_SetMatrix(obj, &FS_MATRIX { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: x, f: baseline });
+            b.FPDFPage_InsertObject(page, obj);
+        }
+        baseline -= size * 1.2;
+    }
+    Ok(None)
+}
+
+unsafe fn load_system_font(b: &Bindings, doc: FPDF_DOCUMENT, style: &FontStyle) -> Result<FPDF_FONT, String> {
+    let (name, file) = style.system();
+    let dir = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into());
+    let data = std::fs::read(Path::new(&dir).join("Fonts").join(format!("{file}.ttf")))
+        .map_err(|e| format!("No se pudo leer la tipografía {name}: {e}"))?;
+    Ok(b.FPDFText_LoadFont(doc, data.as_ptr(), data.len() as c_uint, FONT_TRUETYPE, 1))
+}
+
+/// Imagen PNG, JPEG, GIF, BMP o WebP. El JPEG se incrusta tal cual; el resto, como mapa de bits.
+unsafe fn add_image(
+    b: &Bindings,
+    doc: FPDF_DOCUMENT,
+    page: FPDF_PAGE,
+    path: &Path,
+    [cx, cy]: [f32; 2],
+    [max_w, max_h]: [f32; 2],
+) -> Result<(), String> {
+    let data = std::fs::read(path).map_err(|e| format!("No se pudo leer la imagen: {e}"))?;
+    let img = image::load_from_memory(&data).map_err(|e| format!("No es una imagen válida: {e}"))?;
+    let (pw, ph) = (img.width() as f32, img.height() as f32);
+    // A 96 ppp (como en pantalla), reducida si no cabe.
+    let fit = (max_w / (pw * 0.75)).min(max_h / (ph * 0.75)).min(1.0);
+    let (w, h) = (pw * 0.75 * fit, ph * 0.75 * fit);
+
+    let obj = b.FPDFPageObj_NewImageObj(doc);
+    if obj.is_null() {
+        return Err("No se pudo crear la imagen".into());
+    }
+    let ok = if data.starts_with(&[0xFF, 0xD8]) {
+        let mut reader = MemoryReader(&data);
+        let mut access = FPDF_FILEACCESS {
+            m_FileLen: data.len() as _,
+            m_GetBlock: Some(read_block),
+            m_Param: &mut reader as *mut MemoryReader as *mut std::ffi::c_void,
+        };
+        b.FPDFImageObj_LoadJpegFileInline(std::ptr::null_mut(), 0, obj, &mut access) != 0
+    } else {
+        let rgba = img.to_rgba8();
+        let mut bgra: Vec<u8> = rgba.pixels().flat_map(|p| [p[2], p[1], p[0], p[3]]).collect();
+        let bitmap = b.FPDFBitmap_CreateEx(
+            rgba.width() as c_int,
+            rgba.height() as c_int,
+            BITMAP_BGRA,
+            bgra.as_mut_ptr() as *mut std::ffi::c_void,
+            (rgba.width() * 4) as c_int,
+        );
+        let ok = !bitmap.is_null() && b.FPDFImageObj_SetBitmap(std::ptr::null_mut(), 0, obj, bitmap) != 0;
+        if !bitmap.is_null() {
+            b.FPDFBitmap_Destroy(bitmap);
+        }
+        ok
+    };
+    if !ok {
+        b.FPDFPageObj_Destroy(obj);
+        return Err("PDFium no pudo cargar la imagen".into());
+    }
+    b.FPDFPageObj_SetMatrix(obj, &FS_MATRIX { a: w, b: 0.0, c: 0.0, d: h, e: cx - w / 2.0, f: cy - h / 2.0 });
+    b.FPDFPage_InsertObject(page, obj);
+    Ok(())
+}
+
+struct MemoryReader<'a>(&'a [u8]);
+
+unsafe extern "C" fn read_block(
+    param: *mut std::ffi::c_void,
+    position: std::os::raw::c_ulong,
+    buf: *mut std::os::raw::c_uchar,
+    size: std::os::raw::c_ulong,
+) -> c_int {
+    let data = (*(param as *const MemoryReader)).0;
+    let (start, len) = (position as usize, size as usize);
+    match data.get(start..start + len) {
+        Some(src) => {
+            std::ptr::copy_nonoverlapping(src.as_ptr(), buf, len);
+            1
+        }
+        None => 0,
+    }
+}
+
+/// Tapa la zona con un rectángulo blanco y quita el texto y las imágenes que quedan enteros
+/// debajo (lo que solo queda tapado en parte sigue en el PDF).
+unsafe fn cover(b: &Bindings, page: FPDF_PAGE, rect: [f32; 4]) -> Option<String> {
+    let [x1, y1, x2, y2] = normalize(rect);
+    let inside: Vec<FPDF_PAGEOBJECT> = (0..b.FPDFPage_CountObjects(page))
+        .map(|i| b.FPDFPage_GetObject(page, i))
+        .filter(|&o| !o.is_null() && matches!(b.FPDFPageObj_GetType(o), PAGEOBJ_TEXT | PAGEOBJ_IMAGE))
+        .filter(|&o| {
+            bounds(b, o).is_some_and(|[l, bt, r, t]| l >= x1 - 0.5 && bt >= y1 - 0.5 && r <= x2 + 0.5 && t <= y2 + 0.5)
+        })
+        .collect();
+    let removed = inside.len();
+    for obj in inside {
+        remove(b, page, obj);
+    }
+    let obj = b.FPDFPageObj_CreateNewRect(x1, y1, x2 - x1, y2 - y1);
+    if !obj.is_null() {
+        b.FPDFPageObj_SetFillColor(obj, 255, 255, 255, 255);
+        b.FPDFPath_SetDrawMode(obj, FILLMODE_ALTERNATE, 0);
+        b.FPDFPage_InsertObject(page, obj);
+    }
+    (removed > 0).then(|| {
+        format!(
+            "Zona tapada; se ha{} quitado {removed} elemento{} que quedaba{} debajo",
+            if removed == 1 { "" } else { "n" },
+            if removed == 1 { "" } else { "s" },
+            if removed == 1 { "" } else { "n" },
+        )
+    })
 }
 
 unsafe fn pieces(b: &Bindings, page: FPDF_PAGE, tp: FPDF_TEXTPAGE) -> Vec<Piece> {
@@ -283,6 +559,19 @@ impl FontStyle {
         }
     }
 
+    /// Estilo normal de una familia genérica (para el texto nuevo).
+    fn generic(serif: bool, mono: bool) -> FontStyle {
+        FontStyle {
+            base: String::new(),
+            family: String::new(),
+            embedded: false,
+            bold: false,
+            italic: false,
+            serif,
+            mono,
+        }
+    }
+
     /// Una de las 14 tipografías estándar de PDF (no hace falta incrustarlas).
     fn standard(&self) -> &'static str {
         match (self.mono, self.serif, self.bold, self.italic) {
@@ -404,11 +693,7 @@ unsafe fn write_run(
             let name = style.standard();
             (b.FPDFText_LoadStandardFont(doc, name), name.split('-').next().unwrap_or(name).to_string())
         } else {
-            let (name, file) = style.system();
-            let dir = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into());
-            let data = std::fs::read(Path::new(&dir).join("Fonts").join(format!("{file}.ttf")))
-                .map_err(|e| format!("No se pudo leer la tipografía {name}: {e}"))?;
-            (b.FPDFText_LoadFont(doc, data.as_ptr(), data.len() as c_uint, FONT_TRUETYPE, 1), name.to_string())
+            (load_system_font(b, doc, &style)?, style.system().0.to_string())
         };
         if font.is_null() {
             return Err("No se pudo cargar una tipografía de repuesto".into());
@@ -485,6 +770,16 @@ unsafe fn write_run(
 }
 
 #[cfg(test)]
+fn runs_of(dll: &Path, pdf: &[u8], page: i32) -> Result<Vec<TextRun>, String> {
+    page_content(dll, pdf, page).map(|c| c.runs)
+}
+
+#[cfg(test)]
+fn edit_text_for_tests(dll: &Path, pdf: &[u8], page: i32, objects: &[i32], text: &str) -> Result<Edited, String> {
+    edit_page(dll, pdf, page, &PageEdit::Text { objects: objects.to_vec(), text: text.into() })
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -517,14 +812,14 @@ mod tests {
     #[test]
     fn edits_a_line() {
         let pdf = sample();
-        let runs = text_runs(&dll(), &pdf, 0).unwrap();
+        let runs = runs_of(&dll(), &pdf, 0).unwrap();
         assert_eq!(runs.iter().map(|r| r.text.as_str()).collect::<Vec<_>>(), ["Hola mundo", "Segunda linea"]);
         assert!((runs[0].size - 12.0).abs() < 0.01, "{:?}", runs[0]);
         assert!(!runs[0].serif && !runs[0].bold);
 
-        let edited = edit_text(&dll(), &pdf, 0, &runs[0].objects, "Adiós, mundo").unwrap();
+        let edited = edit_text_for_tests(&dll(), &pdf, 0, &runs[0].objects, "Adiós, mundo").unwrap();
         assert!(edited.notice.is_none(), "{:?}", edited.notice);
-        let after = text_runs(&dll(), &edited.pdf, 0).unwrap();
+        let after = runs_of(&dll(), &edited.pdf, 0).unwrap();
         let texts: Vec<&str> = after.iter().map(|r| r.text.as_str()).collect();
         assert_eq!(texts, ["Adiós, mundo", "Segunda linea"]);
         assert!((after[0].baseline - runs[0].baseline).abs() < 0.01);
@@ -532,26 +827,105 @@ mod tests {
         assert!((after[0].rect[0] - runs[0].rect[0]).abs() < 1.5);
 
         // Borrar un tramo.
-        let removed = edit_text(&dll(), &edited.pdf, 0, &after[1].objects, "  ").unwrap();
-        let left = text_runs(&dll(), &removed.pdf, 0).unwrap();
+        let removed = edit_text_for_tests(&dll(), &edited.pdf, 0, &after[1].objects, "  ").unwrap();
+        let left = runs_of(&dll(), &removed.pdf, 0).unwrap();
         assert_eq!(left.len(), 1);
     }
 
     #[test]
     fn letters_outside_winansi_use_a_system_font() {
         let pdf = sample();
-        let runs = text_runs(&dll(), &pdf, 0).unwrap();
-        let edited = edit_text(&dll(), &pdf, 0, &runs[1].objects, "Línea αβγ").unwrap();
+        let runs = runs_of(&dll(), &pdf, 0).unwrap();
+        let edited = edit_text_for_tests(&dll(), &pdf, 0, &runs[1].objects, "Línea αβγ").unwrap();
         assert!(edited.notice.as_deref().unwrap_or("").contains("Arial"), "{:?}", edited.notice);
-        let after = text_runs(&dll(), &edited.pdf, 0).unwrap();
+        let after = runs_of(&dll(), &edited.pdf, 0).unwrap();
         let joined: String = after.iter().skip(1).map(|r| r.text.clone()).collect::<Vec<_>>().join(" ");
         assert!(joined.contains("Línea") && joined.contains("αβγ"), "{joined}");
     }
 
     #[test]
+    fn adds_text_images_and_covers() {
+        let pdf = sample();
+        let added = edit_page(
+            &dll(),
+            &pdf,
+            0,
+            &PageEdit::AddText {
+                x: 72.0,
+                y: 600.0,
+                text: "Nuevo\nDos líneas".into(),
+                size: 14.0,
+                color: [200, 0, 0],
+                font: "serif".into(),
+            },
+        )
+        .unwrap();
+        let texts: Vec<String> = runs_of(&dll(), &added.pdf, 0).unwrap().into_iter().map(|r| r.text).collect();
+        assert!(texts.contains(&"Nuevo".to_string()) && texts.contains(&"Dos líneas".to_string()), "{texts:?}");
+
+        // Imagen PNG de 40×20 px.
+        let png = std::env::temp_dir().join("pdfiiuum-test.png");
+        image::RgbaImage::from_pixel(40, 20, image::Rgba([0, 128, 255, 128])).save(&png).unwrap();
+        let with_image = edit_page(
+            &dll(),
+            &added.pdf,
+            0,
+            &PageEdit::AddImage { path: png.to_string_lossy().into(), center: [300.0, 400.0], max: [500.0, 500.0] },
+        )
+        .unwrap();
+        let content = page_content(&dll(), &with_image.pdf, 0).unwrap();
+        assert_eq!(content.images.len(), 1);
+        let r = content.images[0].rect;
+        assert!(((r[2] - r[0]) - 30.0).abs() < 0.5 && ((r[3] - r[1]) - 15.0).abs() < 0.5, "{r:?}");
+
+        // Moverla y agrandarla.
+        let moved = edit_page(
+            &dll(),
+            &with_image.pdf,
+            0,
+            &PageEdit::Move { index: content.images[0].index, rect: [100.0, 100.0, 160.0, 130.0] },
+        )
+        .unwrap();
+        let r = page_content(&dll(), &moved.pdf, 0).unwrap().images[0].rect;
+        assert!((r[0] - 100.0).abs() < 0.5 && (r[2] - 160.0).abs() < 0.5 && (r[3] - 130.0).abs() < 0.5, "{r:?}");
+
+        // Tapar la primera línea: desaparece su texto.
+        let first = runs_of(&dll(), &moved.pdf, 0).unwrap().into_iter().find(|r| r.text == "Hola mundo").unwrap();
+        let [x1, y1, x2, y2] = first.rect;
+        let covered =
+            edit_page(&dll(), &moved.pdf, 0, &PageEdit::Cover { rect: [x1 - 2.0, y1 - 2.0, x2 + 2.0, y2 + 2.0] }).unwrap();
+        assert!(covered.notice.is_some());
+        assert!(!runs_of(&dll(), &covered.pdf, 0).unwrap().iter().any(|r| r.text == "Hola mundo"));
+
+        // Borrar la imagen.
+        let idx = page_content(&dll(), &covered.pdf, 0).unwrap().images[0].index;
+        let deleted = edit_page(&dll(), &covered.pdf, 0, &PageEdit::Delete { indices: vec![idx] }).unwrap();
+        assert!(page_content(&dll(), &deleted.pdf, 0).unwrap().images.is_empty());
+    }
+
+    #[test]
+    fn jpeg_is_embedded_as_is() {
+        let jpg = std::env::temp_dir().join("pdfiiuum-test.jpg");
+        image::RgbImage::from_pixel(200, 100, image::Rgb([200, 30, 30])).save(&jpg).unwrap();
+        let size = std::fs::metadata(&jpg).unwrap().len() as usize;
+        let out = edit_page(
+            &dll(),
+            &sample(),
+            0,
+            &PageEdit::AddImage { path: jpg.to_string_lossy().into(), center: [300.0, 400.0], max: [100.0, 100.0] },
+        )
+        .unwrap();
+        let r = page_content(&dll(), &out.pdf, 0).unwrap().images[0].rect;
+        // 200×100 px son 150×75 pt: se reduce a 100×50 para caber.
+        assert!(((r[2] - r[0]) - 100.0).abs() < 0.5 && ((r[3] - r[1]) - 50.0).abs() < 0.5, "{r:?}");
+        assert!(out.pdf.windows(9).any(|w| w == b"DCTDecode"), "el JPEG debería ir sin recomprimir");
+        assert!(out.pdf.len() < 4000 + size, "{} bytes", out.pdf.len());
+    }
+
+    #[test]
     fn rejects_stale_objects() {
         let pdf = sample();
-        assert!(edit_text(&dll(), &pdf, 0, &[99], "x").is_err());
+        assert!(edit_text_for_tests(&dll(), &pdf, 0, &[99], "x").is_err());
     }
 }
 
@@ -569,12 +943,12 @@ mod real {
         };
         let dll = Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/pdfium.dll");
         let pdf = std::fs::read(input).unwrap();
-        let runs = text_runs(&dll, &pdf, 0).unwrap();
+        let runs = runs_of(&dll, &pdf, 0).unwrap();
         for r in &runs {
             eprintln!("{:?} {:.1}pt {} b={} i={} s={} «{}»", r.objects, r.size, r.family, r.bold, r.italic, r.serif, r.text);
         }
         let first = &runs[0];
-        let edited = edit_text(&dll, &pdf, 0, &first.objects, &format!("{} (ñ)", first.text)).unwrap();
+        let edited = edit_text_for_tests(&dll, &pdf, 0, &first.objects, &format!("{} (ñ)", first.text)).unwrap();
         eprintln!("aviso: {:?}", edited.notice);
         std::fs::write(output, &edited.pdf).unwrap();
     }

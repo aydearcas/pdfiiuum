@@ -10,10 +10,10 @@ import CommentsPanel, { sortItems, type PanelItem } from "./CommentsPanel";
 import { bounds, diffAnnots, newId, pdfDate, toNative, type Annot, type MarkupKind } from "../lib/annotations";
 import { openDocument } from "../lib/document";
 import type { TextSelection } from "../lib/selection";
-import { isEditTool, type Tool, type ToolStyle } from "../lib/tools";
-import type { TextRun } from "../lib/edit";
+import { isEditTool, type EditTool, type Tool, type ToolStyle } from "../lib/tools";
+import type { PageContent, PageEdit } from "../lib/edit";
 import { useAnnotations } from "../lib/useAnnotations";
-import { baseName, editText, getUserName, isTauri, saveAnnotated, savePdf, textRuns } from "../lib/platform";
+import { baseName, editPage, getUserName, isTauri, pageContent, pickImage, saveAnnotated, savePdf } from "../lib/platform";
 
 /** Documento con el que se crea una pestaña. */
 export interface TabInit {
@@ -65,6 +65,8 @@ export interface DocTabHandle {
   deleteSelected(): boolean;
   escape(): void;
   snapshot(): TabSnapshot;
+  /** Modo edición: inserta una imagen en la página actual. */
+  insertImage(): Promise<void>;
 }
 
 interface Props {
@@ -85,6 +87,13 @@ interface Props {
   copyText(text: string, message: string): void;
   onStatus(id: string, status: TabStatus): void;
 }
+
+const EDIT_HINTS: Record<EditTool, string> = {
+  edittext: "Haz clic en un texto para corregirlo · Intro aplica · Esc cancela · Ctrl+Z deshace",
+  addtext: "Haz clic donde quieras escribir · Ctrl+Intro termina · Esc cancela",
+  objects: "Arrastra una imagen para moverla · su esquina cambia el tamaño · Supr la borra",
+  cover: "Arrastra para tapar una zona: se pinta de blanco y se quita lo que quede entero debajo",
+};
 
 export default function DocTab(p: Props) {
   const { id, active, tool, toolStyle, setTool, setToolStyle, notify, copyText, onStatus } = p;
@@ -309,33 +318,33 @@ export default function DocTab(p: Props) {
     setDoc({ ...d, ...reopened, bytes, view });
   }, []);
 
-  // Tramos de cada página, leídos una vez por versión del PDF.
-  const runsCache = useMemo(() => new Map<number, Promise<TextRun[]>>(), [doc.bytes]);
-  const getRuns = useCallback(
+  // Contenido editable de cada página, leído una vez por versión del PDF.
+  const contentCache = useMemo(() => new Map<number, Promise<PageContent>>(), [doc.bytes]);
+  const getContent = useCallback(
     (n: number) => {
-      let runs = runsCache.get(n);
-      if (!runs) {
-        runs = textRuns(doc.bytes, n);
-        runsCache.set(n, runs);
+      let content = contentCache.get(n);
+      if (!content) {
+        content = pageContent(doc.bytes, n);
+        contentCache.set(n, content);
       }
-      return runs;
+      return content;
     },
-    [runsCache, doc.bytes],
+    [contentCache, doc.bytes],
   );
 
-  const editRun = useCallback(
-    async (n: number, run: TextRun, text: string) => {
+  const applyEdit = useCallback(
+    async (n: number, change: PageEdit) => {
       if (editBusy.current) return false;
       editBusy.current = true;
       const before = docRef.current.bytes;
       try {
-        const result = await editText(before, n, run.objects, text);
+        const result = await editPage(before, n, change);
         await showBytes(result.bytes);
         setEdits((s) => ({ past: [...s.past, before].slice(-50), future: [] }));
         if (result.notice) notify(result.notice);
         return true;
       } catch (e) {
-        notify(`No se pudo corregir el texto: ${e instanceof Error ? e.message : e}`, true);
+        notify(`No se pudo editar el PDF: ${e instanceof Error ? e.message : e}`, true);
         return false;
       } finally {
         editBusy.current = false;
@@ -343,6 +352,21 @@ export default function DocTab(p: Props) {
     },
     [showBytes, notify],
   );
+
+  /** Imagen elegida por el usuario, en el centro de la página actual y como mucho al 60 %. */
+  const insertImage = useCallback(async () => {
+    const path = await pickImage();
+    if (!path) return;
+    const n = page;
+    const [x1, y1, x2, y2] = (await docRef.current.pdf.getPage(n)).view;
+    const ok = await applyEdit(n, {
+      op: "addImage",
+      path,
+      center: [(x1 + x2) / 2, (y1 + y2) / 2],
+      max: [(x2 - x1) * 0.6, (y2 - y1) * 0.6],
+    });
+    if (ok) setTool("objects");
+  }, [page, applyEdit, setTool]);
 
   const undoEdit = useCallback(
     async (redo: boolean) => {
@@ -391,8 +415,9 @@ export default function DocTab(p: Props) {
         view: viewer.current?.viewState(),
         edited: docRef.current.bytes !== diskBytes.current,
       }),
+      insertImage,
     }),
-    [save, history.undo, history.redo, selectedId, onDelete, clearSelection, editMode, undoEdit],
+    [save, history.undo, history.redo, selectedId, onDelete, clearSelection, editMode, undoEdit, insertImage],
   );
 
   // Panel lateral: notas y marcas en orden de lectura; «Sin guardar» las nuevas o cambiadas.
@@ -489,14 +514,10 @@ export default function DocTab(p: Props) {
           onChange={history.change}
           onDelete={onDelete}
           onEdit={setEditingId}
-          getRuns={getRuns}
-          onEditRun={editRun}
+          getContent={getContent}
+          onEditPage={applyEdit}
         />
-        {active && editMode && (
-          <div className="edit-hint">
-            Haz clic en un texto para corregirlo · Intro aplica · Esc cancela · Ctrl+Z deshace
-          </div>
-        )}
+        {active && editMode && <div className="edit-hint">{EDIT_HINTS[tool as EditTool]}</div>}
         {searchOpen && (
           <SearchBar
             status={findStatus}

@@ -1,10 +1,12 @@
 import type { AnnotKind, MarkupKind } from "./annotations";
+import type { EditFont } from "./edit";
 
 /** Herramientas del modo edición (cambian el contenido del PDF; solo en escritorio). */
-export type EditTool = "edittext";
+export type EditTool = "edittext" | "addtext" | "objects" | "cover";
 export type Tool = "select" | "hand" | AnnotKind | EditTool;
 
-export const isEditTool = (t: Tool): t is EditTool => t === "edittext";
+export const EDIT_TOOLS: EditTool[] = ["edittext", "addtext", "objects", "cover"];
+export const isEditTool = (t: Tool): t is EditTool => (EDIT_TOOLS as Tool[]).includes(t);
 
 export const MARKUP_TOOLS: MarkupKind[] = ["highlight", "underline", "strikeout"];
 
@@ -16,6 +18,8 @@ export interface ToolStyle {
   inkWidth: number;
   /** El lápiz digital dibuja con cualquier herramienta (como en OneNote). */
   penDraws: boolean;
+  /** Tipografía del texto que se añade al contenido del PDF (modo edición). */
+  editFont: EditFont;
 }
 
 export const DEFAULT_STYLE: ToolStyle = {
@@ -30,4 +34,5 @@ export const DEFAULT_STYLE: ToolStyle = {
   fontSize: 14,
   inkWidth: 2,
   penDraws: true,
+  editFont: "sans",
 };

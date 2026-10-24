@@ -847,8 +847,87 @@ button {
   inset: 0;
   pointer-events: none;
 }
-.viewer-container.tool-edittext .textLayer {
+.viewer-container.edit-mode .textLayer {
   pointer-events: none;
+}
+.edit-surface {
+  position: absolute;
+  inset: 0;
+  pointer-events: auto;
+}
+.edit-addtext .edit-surface {
+  cursor: text;
+}
+.edit-cover .edit-surface {
+  cursor: crosshair;
+}
+.new-text-editor {
+  position: absolute;
+  box-sizing: content-box;
+  margin: 0;
+  padding: 0 2px;
+  border: 1.5px dashed var(--accent);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.85);
+  outline: none;
+  resize: none;
+  overflow: hidden;
+  white-space: pre;
+  z-index: 3;
+}
+.new-text-editor.applying,
+.edit-image.applying,
+.cover-preview.applying {
+  opacity: 0.6;
+  cursor: progress;
+}
+.edit-image {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px dashed rgba(226, 35, 26, 0.45);
+  cursor: move;
+  touch-action: none;
+}
+.edit-image:hover {
+  background: rgba(226, 35, 26, 0.06);
+}
+.edit-image.selected {
+  border: 1.5px solid var(--accent);
+}
+.edit-handle {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 11px;
+  height: 11px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: nwse-resize;
+}
+.edit-delete {
+  position: absolute;
+  top: -30px;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--text);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+}
+.edit-delete:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.cover-preview {
+  position: absolute;
+  background: #fff;
+  outline: 1.5px dashed var(--accent);
 }
 .edit-run {
   position: absolute;
@@ -883,7 +962,7 @@ button {
 .edit-hint {
   position: absolute;
   left: 50%;
-  bottom: 18px;
+  top: 12px;
   transform: translateX(-50%);
   padding: 7px 14px;
   border-radius: 999px;
@@ -1299,10 +1378,11 @@ body:not(.pen-seen) .annot-layer.creating.tool-ink {
   white-space: nowrap;
   pointer-events: none;
 }
+/* Se abre hacia arriba: el botón de color queda al final de la barra de herramientas. */
 .tool-options {
   position: absolute;
   left: calc(100% + 10px);
-  top: 0;
+  bottom: 0;
   width: 212px;
   padding: 10px;
   border-radius: 12px;

@@ -5,7 +5,7 @@ import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { NativeExisting } from "./annotations";
-import type { TextRun } from "./edit";
+import type { PageContent, PageEdit } from "./edit";
 
 export const isTauri = "__TAURI_INTERNALS__" in window;
 
@@ -125,22 +125,30 @@ function unframe<T>(buf: ArrayBuffer): [T, Uint8Array] {
   return [JSON.parse(new TextDecoder().decode(out.subarray(4, 4 + len))) as T, out.slice(4 + len)];
 }
 
-/** Modo edición: tramos de texto que se pueden corregir en una página (desde 1). */
-export function textRuns(pdf: Uint8Array, page: number): Promise<TextRun[]> {
-  return invoke<TextRun[]>("text_runs", pdf, { headers: { page: String(page - 1) } });
+/** Modo edición: tramos de texto e imágenes de una página (desde 1). */
+export function pageContent(pdf: Uint8Array, page: number): Promise<PageContent> {
+  return invoke<PageContent>("page_content", pdf, { headers: { page: String(page - 1) } });
 }
 
-/** Sustituye el texto de un tramo. Devuelve el PDF editado y, si lo hay, un aviso. */
-export async function editText(
+/** Aplica un cambio a una página. Devuelve el PDF editado y, si lo hay, un aviso. */
+export async function editPage(
   pdf: Uint8Array,
   page: number,
-  objects: number[],
-  text: string,
+  edit: PageEdit,
 ): Promise<{ bytes: Uint8Array; notice: string | null }> {
   const [meta, bytes] = unframe<{ notice: string | null }>(
-    await invoke<ArrayBuffer>("edit_text", framed({ page: page - 1, objects, text }, pdf)),
+    await invoke<ArrayBuffer>("edit_page", framed({ page: page - 1, edit }, pdf)),
   );
   return { bytes, notice: meta.notice };
+}
+
+/** Elige una imagen para insertarla en el PDF (ruta, o null si se cancela). */
+export async function pickImage(): Promise<string | null> {
+  return open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: "Imágenes", extensions: ["png", "jpg", "jpeg", "gif", "bmp", "webp"] }],
+  });
 }
 
 /** Pregunta Sí/No con el diálogo nativo (o confirm() en el navegador). */

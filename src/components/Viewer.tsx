@@ -11,10 +11,10 @@ import {
 import { IMAGE_RESOURCES, type PDFDocument } from "../lib/pdf";
 import { contains, type Annot, type MarkupKind, type Point } from "../lib/annotations";
 import { readSelection, type TextSelection } from "../lib/selection";
-import { isMarkupTool, type Tool, type ToolStyle } from "../lib/tools";
+import { isEditTool, isMarkupTool, type Tool, type ToolStyle } from "../lib/tools";
 import AnnotationLayer, { type LayerCallbacks } from "./AnnotationLayer";
 import EditLayer from "./EditLayer";
-import type { TextRun } from "../lib/edit";
+import type { PageContent, PageEdit } from "../lib/edit";
 
 export interface FindStatus {
   current: number;
@@ -63,9 +63,9 @@ interface Props extends LayerCallbacks {
   onMarkup(kind: MarkupKind, sel: TextSelection): void;
   /** Clic derecho sobre una anotación pendiente. */
   onAnnotMenu(id: string, at: DOMRect): void;
-  /** Modo edición: tramos de texto de una página y su corrección. */
-  getRuns(page: number): Promise<TextRun[]>;
-  onEditRun(page: number, run: TextRun, text: string): Promise<boolean>;
+  /** Modo edición: contenido editable de una página y cambios en ella. */
+  getContent(page: number): Promise<PageContent>;
+  onEditPage(page: number, edit: PageEdit): Promise<boolean>;
 }
 
 const MIN_SCALE = 0.1;
@@ -319,7 +319,7 @@ export default function Viewer(props: Props) {
   return (
     <div
       ref={containerRef}
-      className={`viewer-container tool-${tool}`}
+      className={`viewer-container tool-${tool}${isEditTool(tool) ? " edit-mode" : ""}`}
       tabIndex={-1}
       data-layout={layoutTick}
     >
@@ -343,12 +343,14 @@ export default function Viewer(props: Props) {
                 onDelete={props.onDelete}
                 onEdit={props.onEdit}
               />
-              {tool === "edittext" && (
+              {isEditTool(tool) && (
                 <EditLayer
                   page={page}
                   viewport={viewer.getPageView(page - 1).viewport}
-                  getRuns={props.getRuns}
-                  onEdit={props.onEditRun}
+                  tool={tool}
+                  style={props.style}
+                  getContent={props.getContent}
+                  onEdit={props.onEditPage}
                 />
               )}
             </>,

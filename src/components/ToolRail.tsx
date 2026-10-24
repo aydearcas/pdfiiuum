@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import {
+  Eraser,
   Hand,
   Highlighter,
+  ImagePlus,
+  Images,
+  LetterText,
   MessageSquarePlus,
   MousePointer2,
   PenLine,
@@ -13,7 +17,8 @@ import {
 import IconButton from "./IconButton";
 import { FONT_SIZES, INK_WIDTHS, paletteFor, type AnnotKind } from "../lib/annotations";
 import { isTauri } from "../lib/platform";
-import { isEditTool, type Tool, type ToolStyle } from "../lib/tools";
+import { EDIT_FONTS } from "../lib/edit";
+import { isEditTool, type EditTool, type Tool, type ToolStyle } from "../lib/tools";
 
 interface Props {
   tool: Tool;
@@ -21,6 +26,7 @@ interface Props {
   disabled: boolean;
   onTool(tool: Tool): void;
   onStyle(style: ToolStyle): void;
+  onInsertImage(): void;
 }
 
 const ANNOT_TOOLS: { tool: AnnotKind; icon: typeof Hand; label: string }[] = [
@@ -32,9 +38,17 @@ const ANNOT_TOOLS: { tool: AnnotKind; icon: typeof Hand; label: string }[] = [
   { tool: "ink", icon: PenLine, label: "Dibujar (D)" },
 ];
 
-export default function ToolRail({ tool, style, disabled, onTool, onStyle }: Props) {
+const EDIT_TOOLS: { tool: EditTool; icon: typeof Hand; label: string }[] = [
+  { tool: "edittext", icon: TextCursorInput, label: "Corregir texto del PDF (E)" },
+  { tool: "addtext", icon: LetterText, label: "Añadir texto al PDF" },
+  { tool: "objects", icon: Images, label: "Mover, cambiar tamaño o borrar imágenes" },
+  { tool: "cover", icon: Eraser, label: "Tapar una zona" },
+];
+
+export default function ToolRail({ tool, style, disabled, onTool, onStyle, onInsertImage }: Props) {
   const [optionsOpen, setOptionsOpen] = useState(false);
-  const annotTool = tool !== "select" && tool !== "hand" && !isEditTool(tool) ? tool : null;
+  // El texto añadido al PDF usa el color y el tamaño de la herramienta de texto.
+  const annotTool = tool === "addtext" ? "text" : tool !== "select" && tool !== "hand" && !isEditTool(tool) ? tool : null;
 
   useEffect(() => {
     if (!optionsOpen) return;
@@ -65,13 +79,17 @@ export default function ToolRail({ tool, style, disabled, onTool, onStyle }: Pro
       {isTauri && (
         <>
           <span className="divider horizontal" />
-          <IconButton
-            icon={TextCursorInput}
-            label="Corregir texto del PDF (E)"
-            active={tool === "edittext"}
-            disabled={disabled}
-            onClick={() => onTool(tool === "edittext" ? "select" : "edittext")}
-          />
+          {EDIT_TOOLS.map((t) => (
+            <IconButton
+              key={t.tool}
+              icon={t.icon}
+              label={t.label}
+              active={tool === t.tool}
+              disabled={disabled}
+              onClick={() => onTool(tool === t.tool ? "select" : t.tool)}
+            />
+          ))}
+          <IconButton icon={ImagePlus} label="Insertar imagen en la página" disabled={disabled} onClick={onInsertImage} />
         </>
       )}
 
@@ -126,6 +144,21 @@ export default function ToolRail({ tool, style, disabled, onTool, onStyle }: Pro
                       onClick={() => onStyle({ ...style, inkWidth: w })}
                     >
                       <span className="stroke-sample" style={{ height: Math.max(1, w) }} />
+                    </button>
+                  ))}
+                </div>
+              )}
+              {tool === "addtext" && (
+                <div className="option-row">
+                  <span>Tipografía</span>
+                  {EDIT_FONTS.map((f) => (
+                    <button
+                      key={f.font}
+                      className={`chip${style.editFont === f.font ? " active" : ""}`}
+                      style={{ fontFamily: f.css }}
+                      onClick={() => onStyle({ ...style, editFont: f.font })}
+                    >
+                      {f.label}
                     </button>
                   ))}
                 </div>
