@@ -8,6 +8,12 @@
 ; Puente con la extensión del navegador (mensajería nativa de Edge, Chrome y Brave)
 !define PDFIIUUM_HOST "com.pdfiiuum.open"
 
+; El visor de la extensión cambia de nombres de archivo en cada versión: se quita el
+; anterior para que no se acumulen archivos viejos al actualizar.
+!macro NSIS_HOOK_PREINSTALL
+  RMDir /r "$INSTDIR\extension\viewer"
+!macroend
+
 !macro NSIS_HOOK_POSTINSTALL
   ; ProgID con icono y comando de apertura
   WriteRegStr SHCTX "Software\Classes\${PDFIIUUM_PROGID}" "" "Documento PDF"
