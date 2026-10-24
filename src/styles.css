@@ -465,8 +465,9 @@ button {
   align-items: center;
   gap: 2px;
   margin-top: 8px;
-  padding: 3px;
-  border-radius: 11px;
+  padding: 2px;
+  border: 2px solid var(--accent);
+  border-radius: 12px;
   background: var(--text);
 }
 .tool-group.inverted .icon-btn {
