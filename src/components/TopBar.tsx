@@ -5,6 +5,7 @@ import {
   Maximize,
   MoveHorizontal,
   PanelLeft,
+  Puzzle,
   Redo2,
   RotateCw,
   Save,
@@ -15,6 +16,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import IconButton from "./IconButton";
+import { isTauri } from "../lib/platform";
 
 interface Props {
   fileName: string | null;
@@ -39,6 +41,7 @@ interface Props {
   onScale(value: string | number): void;
   onRotate(): void;
   onSearch(): void;
+  onBrowserExtension(): void;
 }
 
 const PRESETS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
@@ -142,6 +145,9 @@ export default function TopBar(p: Props) {
       )}
 
       <div className="topbar-group right">
+        {isTauri && (
+          <IconButton icon={Puzzle} label="Extensión para el navegador" onClick={p.onBrowserExtension} />
+        )}
         <IconButton icon={Search} label="Buscar (Ctrl+F)" disabled={!p.hasDoc} onClick={p.onSearch} />
       </div>
     </header>

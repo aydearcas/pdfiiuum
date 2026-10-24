@@ -1,3 +1,4 @@
+mod extension_setup;
 pub mod native_host;
 mod pdf_edit;
 mod pdf_pages;
@@ -272,6 +273,9 @@ pub fn run() {
             extract_pages,
             bake_annotations,
             user_name,
+            extension_setup::extension_info,
+            extension_setup::open_extension_folder,
+            extension_setup::open_browser_extensions,
             windows::drop_tab,
             windows::take_window_payload
         ])

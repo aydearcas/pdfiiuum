@@ -3,6 +3,7 @@ import { FolderOpen } from "lucide-react";
 import TabBar from "./components/TabBar";
 import TopBar from "./components/TopBar";
 import ToolRail from "./components/ToolRail";
+import ExtensionDialog from "./components/ExtensionDialog";
 import DocTab, { type DocTabHandle, type TabInit, type TabSnapshot, type TabStatus } from "./components/DocTab";
 import { openDocument } from "./lib/document";
 import { DEFAULT_STYLE, type Tool, type ToolStyle } from "./lib/tools";
@@ -79,6 +80,8 @@ export default function App() {
   const [closing, setClosing] = useState<Set<string>>(new Set());
   const [statuses, setStatuses] = useState<Record<string, TabStatus>>({});
   const [tool, setTool] = useState<Tool>("select");
+  const [extensionOpen, setExtensionOpen] = useState(false);
+  const closeExtension = useCallback(() => setExtensionOpen(false), []);
   const [toolStyle, setToolStyle] = useState<ToolStyle>(() => ({
     ...DEFAULT_STYLE,
     penDraws: readPref(PEN_DRAWS_PREF, DEFAULT_STYLE.penDraws),
@@ -415,7 +418,9 @@ export default function App() {
         onScale={(v) => active?.setScale(v)}
         onRotate={() => active?.rotate()}
         onSearch={() => active?.toggleSearch()}
+        onBrowserExtension={() => setExtensionOpen(true)}
       />
+      {extensionOpen && <ExtensionDialog onClose={closeExtension} notify={notify} copyText={copyText} />}
       <div className="body">
         <ToolRail
           tool={tool}

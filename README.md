@@ -38,6 +38,8 @@ pdfiiuum es un lector de PDF de escritorio para Windows, ligero y con interfaz o
 
 Añade un botón **Abrir en pdfiiuum** (y la misma opción en el menú del botón derecho sobre una página o un enlace) que descarga el PDF con tu sesión del navegador, lo guarda en **Descargas** y lo abre en pdfiiuum. Funciona también con PDF que piden iniciar sesión y con PDF locales (`file://`).
 
+En pdfiiuum, el botón de la pieza de puzle (arriba a la derecha) abre una guía con botones para abrir la página de extensiones de cada navegador instalado y la carpeta de la extensión. Los navegadores no dejan que un programa instale extensiones de fuera de su tienda, así que se carga a mano una vez:
+
 1. Instala pdfiiuum (el instalador deja la extensión en `C:\Program Files\pdfiiuum\extension` y la conecta con la app).
 2. Abre `edge://extensions` (o `chrome://extensions`, `brave://extensions`) y activa **Modo de desarrollador**.
 3. Pulsa **Cargar desempaquetada** y elige la carpeta `extension` de la instalación.

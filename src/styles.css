@@ -457,6 +457,29 @@ button {
   z-index: 10;
 }
 
+/* Modo edición: bloque con los colores invertidos (fondo claro, iconos oscuros) para
+   distinguir lo que cambia el contenido del PDF de las anotaciones. */
+.tool-group.inverted {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin-top: 8px;
+  padding: 3px;
+  border-radius: 11px;
+  background: var(--text);
+}
+.tool-group.inverted .icon-btn {
+  color: var(--panel);
+}
+.tool-group.inverted .icon-btn:hover:not(:disabled) {
+  background: rgba(35, 36, 40, 0.14);
+}
+.tool-group.inverted .icon-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
 /* ---------- Panel izquierdo: miniaturas y marcadores ---------- */
 .left-panel {
   width: 240px;
@@ -1505,6 +1528,110 @@ body:not(.pen-seen) .annot-layer.creating.tool-ink {
 }
 
 /* ---------- Aviso ---------- */
+/* ---------- Diálogo ---------- */
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 90;
+}
+.dialog {
+  width: min(520px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 18px 20px;
+  border-radius: 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dialog-head h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.dialog-intro,
+.dialog-note {
+  color: var(--muted);
+}
+.dialog-note code,
+.dialog-path {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+}
+.dialog-error {
+  color: #ff7a73;
+}
+.dialog-steps {
+  margin: 14px 0;
+  padding-left: 22px;
+}
+.dialog-steps li {
+  margin-bottom: 12px;
+}
+.dialog-steps li::marker {
+  color: var(--accent);
+  font-weight: 600;
+}
+.dialog-path {
+  display: block;
+  margin-top: 8px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  word-break: break-all;
+  user-select: all;
+}
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn:hover {
+  background: var(--hover);
+}
+.btn.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.btn.primary:hover {
+  filter: brightness(1.1);
+}
+.dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
 .toast {
   position: fixed;
   bottom: 20px;

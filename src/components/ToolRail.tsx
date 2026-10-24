@@ -79,8 +79,7 @@ export default function ToolRail({ tool, style, disabled, onTool, onStyle, onIns
 
       {/* Modo edición: cambia el contenido del PDF, no son anotaciones. */}
       {isTauri && (
-        <>
-          <span className="divider horizontal" />
+        <div className="tool-group inverted" aria-label="Edición del PDF">
           {EDIT_TOOLS.map((t) => (
             <IconButton
               key={t.tool}
@@ -92,7 +91,7 @@ export default function ToolRail({ tool, style, disabled, onTool, onStyle, onIns
             />
           ))}
           <IconButton icon={ImagePlus} label="Insertar imagen en la página" disabled={disabled} onClick={onInsertImage} />
-        </>
+        </div>
       )}
 
       {annotTool && (

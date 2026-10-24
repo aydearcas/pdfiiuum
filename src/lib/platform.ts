@@ -165,6 +165,25 @@ export async function pickPdfPath(): Promise<string | null> {
   return open({ multiple: false, directory: false, filters: PDF_FILTER });
 }
 
+/** Extensión del navegador: carpeta para «Cargar descomprimida» y navegadores instalados. */
+export interface ExtensionInfo {
+  folder: string;
+  browsers: { id: string; name: string }[];
+}
+
+export function extensionInfo(): Promise<ExtensionInfo> {
+  return invoke<ExtensionInfo>("extension_info");
+}
+
+export function openExtensionFolder(): Promise<void> {
+  return invoke("open_extension_folder");
+}
+
+/** Abre la página de extensiones de Chrome, Edge o Brave. */
+export function openBrowserExtensions(id: string): Promise<void> {
+  return invoke("open_browser_extensions", { id });
+}
+
 /** Elige una imagen para insertarla en el PDF (ruta, o null si se cancela). */
 export async function pickImage(): Promise<string | null> {
   return open({
