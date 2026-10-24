@@ -31,7 +31,7 @@ pdfiiuum es un lector de PDF de escritorio para Windows, ligero y con interfaz o
 
 1. Descarga `pdfiiuum_<versión>_x64-setup.exe` desde [**Releases**](https://github.com/aydearcas/pdfiiuum/releases/latest).
 2. Ábrelo y elige la carpeta de instalación (por defecto `C:\Program Files\pdfiiuum`). Pide permiso de administrador una sola vez.
-3. La primera vez Windows puede mostrar «Windows protegió su PC», porque el instalador no está firmado: pulsa **Más información → Ejecutar de todas formas**.
+3. La primera vez Windows puede mostrar «Windows protegió su PC», porque el instalador no está firmado ([por qué y cómo se firmaría](docs/firma-de-codigo.md)): pulsa **Más información → Ejecutar de todas formas**. Puedes comprobar el archivo con el SHA-256 que aparece en las notas de cada versión.
 4. Para abrir los PDF con doble clic: clic derecho en un PDF → **Abrir con → Elegir otra aplicación → pdfiiuum → Siempre**.
 
 ### Extensión para Edge, Chrome y Brave
