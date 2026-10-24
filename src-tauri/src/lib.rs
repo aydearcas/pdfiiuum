@@ -16,6 +16,23 @@ struct StartupFile(Mutex<Option<String>>);
 /// Ruta de pdfium.dll.
 struct PdfiumPath(PathBuf);
 
+/// Lo único que pueden leer o escribir los comandos que reciben una ruta desde la ventana: así,
+/// aunque alguien llegara a ejecutar código en ella, no le servirían para tocar otro tipo de
+/// archivos (por ejemplo, dejar un .bat en la carpeta de Inicio).
+pub(crate) const PDF: &[&str] = &["pdf"];
+pub(crate) const IMAGES: &[&str] = &["png", "jpg", "jpeg", "gif", "bmp", "webp"];
+
+pub(crate) fn check_path(path: &Path, allowed: &[&str]) -> Result<(), String> {
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+    // Un «:» en el nombre sería un flujo alternativo de NTFS (otro.bat:x.pdf).
+    let stream = path.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.contains(':'));
+    if !stream && allowed.iter().any(|a| ext.eq_ignore_ascii_case(a)) {
+        return Ok(());
+    }
+    let list: Vec<String> = allowed.iter().map(|a| format!(".{a}")).collect();
+    Err(format!("Solo se admiten archivos {}: {}", list.join(", "), path.display()))
+}
+
 #[tauri::command]
 fn startup_file(state: tauri::State<StartupFile>) -> Option<String> {
     state.0.lock().ok()?.take()
@@ -24,6 +41,8 @@ fn startup_file(state: tauri::State<StartupFile>) -> Option<String> {
 /// Devuelve el archivo como binario puro (sin pasar por JSON).
 #[tauri::command]
 fn read_pdf(path: String) -> Result<Response, String> {
+    let path = PathBuf::from(path);
+    check_path(&path, PDF)?;
     std::fs::read(&path)
         .map(Response::new)
         .map_err(|e| e.to_string())
@@ -43,7 +62,9 @@ fn target_path(request: &Request<'_>) -> Result<PathBuf, String> {
         .ok_or("Falta la ruta de destino")?
         .to_str()
         .map_err(|e| e.to_string())?;
-    Ok(PathBuf::from(urlencoding::decode(path).map_err(|e| e.to_string())?.as_ref()))
+    let path = PathBuf::from(urlencoding::decode(path).map_err(|e| e.to_string())?.as_ref());
+    check_path(&path, PDF)?;
+    Ok(path)
 }
 
 /// Escribe primero en un temporal y luego reemplaza: así un fallo
@@ -281,4 +302,24 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error al iniciar la aplicación");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_documents_and_images() {
+        let startup = r"C:\Users\x\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\x.bat";
+        assert!(check_path(Path::new(startup), PDF).is_err());
+        assert!(check_path(Path::new(r"C:\Docs\informe.PDF"), PDF).is_ok());
+        assert!(check_path(Path::new(r"\\servidor\docs\acta de la reunión.pdf"), PDF).is_ok());
+        assert!(check_path(Path::new(r"C:\Docs\sin-extension"), PDF).is_err());
+        assert!(check_path(Path::new(r"C:\Docs\otro.bat:oculto.pdf"), PDF).is_err());
+        assert!(check_path(Path::new(r"C:\Docs\foto.png"), PDF).is_err());
+        assert!(check_path(Path::new(r"C:\Docs\foto.JPG"), IMAGES).is_ok());
+        // Rechazada antes de leer: no llega a abrir el archivo.
+        let ini = pdf_edit::read_source(&Some(r"C:\Windows\win.ini".into()), &None, "la imagen", IMAGES);
+        assert!(ini.unwrap_err().starts_with("Solo se admiten"));
+    }
 }

@@ -100,7 +100,7 @@ pub fn edit_pages(dll: &Path, pdf: &[u8], edit: &PagesEdit) -> Result<Vec<u8>, S
                     b.FPDF_ClosePage(page);
                 }
                 PagesEdit::InsertFile { at, path, data } => {
-                    let data = crate::pdf_edit::read_source(path, data, "el PDF")?;
+                    let data = crate::pdf_edit::read_source(path, data, "el PDF", crate::PDF)?;
                     let src = b.FPDF_LoadMemDocument64(&data, None);
                     if src.is_null() {
                         return Err("No se pudo abrir el PDF (¿está protegido con contraseña?)".into());

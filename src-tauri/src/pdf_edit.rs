@@ -174,7 +174,7 @@ pub fn edit_page(dll: &Path, pdf: &[u8], page: i32, edit: &PageEdit) -> Result<E
                     None
                 }
                 PageEdit::AddImage { path, data, center, max } => {
-                    let bytes = read_source(path, data, "la imagen")?;
+                    let bytes = read_source(path, data, "la imagen", crate::IMAGES)?;
                     add_image(b, doc, page, &bytes, *center, *max)?;
                     None
                 }
@@ -188,15 +188,18 @@ pub fn edit_page(dll: &Path, pdf: &[u8], page: i32, edit: &PageEdit) -> Result<E
     }
 }
 
-/// Contenido de un archivo de entrada: por ruta (app de escritorio) o en base64 (visor del
-/// navegador, que no puede pasar rutas).
-pub(crate) fn read_source(path: &Option<String>, data: &Option<String>, what: &str) -> Result<Vec<u8>, String> {
+/// Contenido de un archivo de entrada: por ruta (app de escritorio, solo con las extensiones
+/// `allowed`) o en base64 (visor del navegador, que no puede pasar rutas).
+pub(crate) fn read_source(path: &Option<String>, data: &Option<String>, what: &str, allowed: &[&str]) -> Result<Vec<u8>, String> {
     use base64::Engine;
     match (path, data) {
         (_, Some(d)) => base64::engine::general_purpose::STANDARD
             .decode(d)
             .map_err(|e| format!("No se pudo leer {what}: {e}")),
-        (Some(p), None) => std::fs::read(p).map_err(|e| format!("No se pudo leer {what}: {e}")),
+        (Some(p), None) => {
+            crate::check_path(Path::new(p), allowed)?;
+            std::fs::read(p).map_err(|e| format!("No se pudo leer {what}: {e}"))
+        }
         (None, None) => Err(format!("Falta {what}")),
     }
 }
