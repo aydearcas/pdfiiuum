@@ -286,6 +286,8 @@ button {
   justify-content: center;
 }
 .topbar-group.right {
+  /* Siempre en la tercera columna, aunque falte el grupo central (sin documento). */
+  grid-column: 3;
   justify-content: flex-end;
 }
 .filename {
@@ -358,6 +360,17 @@ button {
   top: 50%;
   left: calc(100% + 8px);
   transform: translateY(-50%);
+}
+/* En los extremos de la barra superior el aviso se alinea con el botón hacia dentro,
+   para que no se corte con el borde de la ventana. */
+.topbar-group:first-child .icon-btn:first-child[data-tip]:hover::after {
+  left: 0;
+  transform: none;
+}
+.topbar-group.right .icon-btn[data-tip]:hover::after {
+  left: auto;
+  right: 0;
+  transform: none;
 }
 .icon-btn:disabled[data-tip]:hover::after {
   opacity: 1;
