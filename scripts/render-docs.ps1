@@ -8,7 +8,7 @@ $edge = @(
 if (-not $edge) { throw "No se encuentra Microsoft Edge" }
 
 $profile = Join-Path $env:TEMP "pdfiiuum-render-docs"
-foreach ($page in "portada", "interfaz") {
+foreach ($page in "portada", "interfaz", "edicion") {
   $src = Join-Path $root "docs\manual\$page.html"
   $out = Join-Path $root "docs\manual-$page.png"
   Remove-Item $out -ErrorAction SilentlyContinue

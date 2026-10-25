@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>pdfiiuum · modo edición, lápiz y navegador</title>
+<style>
+  :root {
+    --paper: #f2ece0;
+    --ink: #1c1c1c;
+    --muted: #6d675d;
+    --green: #009246;
+    --white: #fbfaf6;
+    --red: #ce2b37;
+    --rule: #cfc7b6;
+    /* colores de la app */
+    --a-panel: #232428;
+    --a-text: #f3f3f4;
+    --a-accent: #e2231a;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    width: 630px; height: 893px; position: relative; overflow: hidden;
+    background: var(--paper); color: var(--ink);
+    font-family: "Segoe UI", Arial, sans-serif;
+  }
+  .top { position: absolute; left: 0; right: 0; top: 0; }
+  .top div { height: 3px; }
+  .runhead {
+    position: absolute; left: 63px; right: 63px; top: 18px; padding-bottom: 6px;
+    display: flex; justify-content: space-between; border-bottom: 1px solid var(--rule);
+    font-size: 10px; color: var(--muted);
+  }
+  .runhead b { color: var(--ink); }
+  h2 {
+    position: absolute; left: 63px; top: 66px; margin: 0;
+    font-family: "Arial Black", sans-serif; font-size: 15px; letter-spacing: -0.2px;
+  }
+  h2 span { font-family: "Segoe UI", sans-serif; font-weight: 700; }
+
+  .content { position: absolute; left: 63px; right: 63px; top: 104px; font-size: 10px; line-height: 1.38; }
+  section + section { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--rule); }
+  h4 { margin: 0 0 4px; font-family: "Arial Black", sans-serif; font-size: 11px; }
+  h4 small { font-family: "Segoe UI", sans-serif; font-size: 9.5px; font-weight: 600; color: var(--muted); margin-left: 6px; }
+  p { margin: 0 0 8px; }
+  kbd { font-family: Consolas, monospace; font-size: 9px; background: #e4dccb; border-radius: 3px; padding: 0 4px; }
+
+  /* ---------- Herramientas del modo edición ---------- */
+  /* iconos de Lucide, los mismos que usa la app */
+  .i { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .ti { display: inline-grid; place-items: center; width: 14px; height: 14px; vertical-align: -3px; margin: 0 1px; border-radius: 3px; background: #2b2d32; color: #f3f3f4; }
+  .ti .i { width: 9.5px; height: 9.5px; }
+  .tools { display: grid; grid-template-columns: 1fr 1fr; column-gap: 22px; row-gap: 7px; margin-top: 2px; }
+  .tools div { display: flex; gap: 10px; align-items: flex-start; }
+  .tile {
+    flex: none; width: 26px; height: 26px; border-radius: 6px; display: grid; place-items: center;
+    background: var(--a-text); color: var(--a-panel); border: 2px solid var(--a-accent);
+    box-shadow: 0 2px 5px rgba(0,0,0,.14);
+  }
+  .tools em { font-style: normal; font-weight: 700; }
+
+  .notes { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 9px; }
+  .notes div { border: 1.4px solid var(--ink); border-radius: 4px; padding: 5px 9px; font-size: 9.5px; }
+  .notes b { display: block; font-size: 9px; letter-spacing: .04em; margin-bottom: 2px; }
+
+  ul { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: 1fr 1fr; column-gap: 26px; row-gap: 5px; }
+  ul li { position: relative; padding-left: 12px; }
+  ul li::before { content: ""; position: absolute; left: 0; top: 5px; width: 5px; height: 5px; background: var(--red); }
+
+  ol { margin: 6px 0 8px; padding: 0; list-style: none; counter-reset: s; display: grid; row-gap: 4px; }
+  ol li { counter-increment: s; display: flex; gap: 9px; }
+  ol li::before {
+    content: counter(s); flex: none; width: 15px; height: 15px; border-radius: 50%;
+    background: var(--ink); color: #fff; display: grid; place-items: center; font-size: 8.5px; font-weight: 800;
+  }
+
+  .foot {
+    position: absolute; left: 63px; right: 63px; bottom: 26px; padding-top: 8px;
+    border-top: 1px solid var(--rule); display: flex; align-items: center; font-size: 10px; color: var(--muted);
+  }
+  .foot .es { margin-left: auto; background: var(--ink); color: #fff; font-weight: 800; padding: 1px 6px; font-size: 10px; }
+  .foot .p { margin-left: 10px; font-family: "Arial Black", sans-serif; color: var(--ink); font-size: 13px; }
+</style>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-file-text" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+    <symbol id="i-panel-left" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></symbol>
+    <symbol id="i-folder-open" viewBox="0 0 24 24"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></symbol>
+    <symbol id="i-save" viewBox="0 0 24 24"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/></symbol>
+    <symbol id="i-save-all" viewBox="0 0 24 24"><path d="M10 2v3a1 1 0 0 0 1 1h5"/><path d="M18 18v-6a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6"/><path d="M18 22H4a2 2 0 0 1-2-2V6"/><path d="M8 18a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9.172a2 2 0 0 1 1.414.586l2.828 2.828A2 2 0 0 1 22 6.828V16a2 2 0 0 1-2.01 2z"/></symbol>
+    <symbol id="i-undo-2" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 5.5 5.5a5.5 5.5 0 0 1-5.5 5.5H11"/></symbol>
+    <symbol id="i-redo-2" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5A5.5 5.5 0 0 0 4 14.5A5.5 5.5 0 0 0 9.5 20H13"/></symbol>
+    <symbol id="i-zoom-out" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="8" x2="14" y1="11" y2="11"/></symbol>
+    <symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-zoom-in" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/><line x1="11" x2="11" y1="8" y2="14"/><line x1="8" x2="14" y1="11" y2="11"/></symbol>
+    <symbol id="i-move-horizontal" viewBox="0 0 24 24"><path d="m18 8 4 4-4 4"/><path d="M2 12h20"/><path d="m6 8-4 4 4 4"/></symbol>
+    <symbol id="i-rotate-cw" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
+    <symbol id="i-puzzle" viewBox="0 0 24 24"><path d="M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></symbol>
+    <symbol id="i-mouse-pointer-2" viewBox="0 0 24 24"><path d="M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z"/></symbol>
+    <symbol id="i-hand" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"/><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></symbol>
+    <symbol id="i-message-square-plus" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/><path d="M12 8v6"/><path d="M9 11h6"/></symbol>
+    <symbol id="i-highlighter" viewBox="0 0 24 24"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></symbol>
+    <symbol id="i-underline" viewBox="0 0 24 24"><path d="M6 4v6a6 6 0 0 0 12 0V4"/><line x1="4" x2="20" y1="20" y2="20"/></symbol>
+    <symbol id="i-strikethrough" viewBox="0 0 24 24"><path d="M16 4H9a3 3 0 0 0-2.83 4"/><path d="M14 12a4 4 0 0 1 0 8H6"/><line x1="4" x2="20" y1="12" y2="12"/></symbol>
+    <symbol id="i-type" viewBox="0 0 24 24"><path d="M12 4v16"/><path d="M4 7V5a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v2"/><path d="M9 20h6"/></symbol>
+    <symbol id="i-pen-line" viewBox="0 0 24 24"><path d="M13 21h8"/><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/></symbol>
+    <symbol id="i-text-cursor-input" viewBox="0 0 24 24"><path d="M12 20h-1a2 2 0 0 1-2-2 2 2 0 0 1-2 2H6"/><path d="M13 8h7a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-7"/><path d="M5 16H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h1"/><path d="M6 4h1a2 2 0 0 1 2 2 2 2 0 0 1 2-2h1"/><path d="M9 6v12"/></symbol>
+    <symbol id="i-text-initial" viewBox="0 0 24 24"><path d="M15 5h6"/><path d="M15 12h6"/><path d="M3 19h18"/><path d="m3 12 3.553-7.724a.5.5 0 0 1 .894 0L11 12"/><path d="M3.92 10h6.16"/></symbol>
+    <symbol id="i-images" viewBox="0 0 24 24"><path d="m22 11-1.296-1.296a2.4 2.4 0 0 0-3.408 0L11 16"/><path d="M4 8a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2"/><circle cx="13" cy="7" r="1" fill="currentColor"/><rect x="8" y="2" width="14" height="14" rx="2"/></symbol>
+    <symbol id="i-eraser" viewBox="0 0 24 24"><path d="M21 21H8a2 2 0 0 1-1.42-.587l-3.994-3.999a2 2 0 0 1 0-2.828l10-10a2 2 0 0 1 2.829 0l5.999 6a2 2 0 0 1 0 2.828L12.834 21"/><path d="m5.082 11.09 8.828 8.828"/></symbol>
+    <symbol id="i-files" viewBox="0 0 24 24"><path d="M15 2h-4a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V8"/><path d="M16.706 2.706A2.4 2.4 0 0 0 15 2v5a1 1 0 0 0 1 1h5a2.4 2.4 0 0 0-.706-1.706z"/><path d="M5 7a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h8a2 2 0 0 0 1.732-1"/></symbol>
+    <symbol id="i-image-plus" viewBox="0 0 24 24"><path d="M16 5h6"/><path d="M19 2v6"/><path d="M21 11.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7.5"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/><circle cx="9" cy="9" r="2"/></symbol>
+    <symbol id="i-layout-grid" viewBox="0 0 24 24"><rect width="7" height="7" x="3" y="3" rx="1"/><rect width="7" height="7" x="14" y="3" rx="1"/><rect width="7" height="7" x="14" y="14" rx="1"/><rect width="7" height="7" x="3" y="14" rx="1"/></symbol>
+    <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M17 3a2 2 0 0 1 2 2v15a1 1 0 0 1-1.496.868l-4.512-2.578a2 2 0 0 0-1.984 0l-4.512 2.578A1 1 0 0 1 5 20V5a2 2 0 0 1 2-2z"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></symbol>
+    <symbol id="i-message-square-text" viewBox="0 0 24 24"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/><path d="M7 11h10"/><path d="M7 15h6"/><path d="M7 7h8"/></symbol>
+    <symbol id="i-panel-right-close" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m8 9 3 3-3 3"/></symbol>
+    <symbol id="i-panel-left-close" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+    <symbol id="i-app-window" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4"/><path d="M2 8h20"/><path d="M6 4v4"/></symbol>
+  </svg>
+  <div class="top"><div style="background:var(--green)"></div><div style="background:var(--white)"></div><div style="background:var(--red)"></div></div>
+  <div class="runhead"><span><b>pdfiiuum</b> · PD-F1</span><span>MANUAL DE INSTRUCCIONES</span></div>
+
+  <h2>MÁS FUNCIONES <span>— modo edición, lápiz y navegador</span></h2>
+
+  <div class="content">
+    <section>
+      <h4>MODO EDICIÓN <small>solo en la app de escritorio</small></h4>
+      <p>Las herramientas del bloque blanco de la barra izquierda cambian el contenido del propio PDF. <kbd>Ctrl</kbd>&nbsp;<kbd>Z</kbd> y <kbd>Ctrl</kbd>&nbsp;<kbd>Y</kbd> deshacen y rehacen mientras una está activa.</p>
+      <div class="tools">
+          <div><span class="tile"><svg class="i"><use href="#i-text-cursor-input"/></svg></span><span><em>Corregir texto</em> (<kbd>E</kbd>): reescribe una línea con su tipografía, tamaño, color y posición; si falta una letra, usa una parecida y avisa. No edita texto girado ni escaneado.</span></div>
+          <div><span class="tile"><svg class="i"><use href="#i-files"/></svg></span><span><em>Organizar páginas</em>: en las miniaturas, selecciona (<kbd>Ctrl</kbd> o <kbd>Mayús</kbd> para varias) y arrastra para reordenar. También gira, borra (<kbd>Supr</kbd>), inserta una página en blanco u otro PDF y extrae a un PDF nuevo.</span></div>
+          <div><span class="tile"><svg class="i"><use href="#i-text-initial"/></svg></span><span><em>Añadir texto al PDF</em> en Sans, Serif o Mono, con el color y el tamaño de la herramienta Texto.</span></div>
+          <div><span class="tile"><svg class="i"><use href="#i-image-plus"/></svg></span><span><em>Insertar imagen</em> PNG, JPEG, GIF, BMP o WebP (el JPEG va sin recomprimir).</span></div>
+          <div><span class="tile"><svg class="i"><use href="#i-images"/></svg></span><span><em>Imágenes del PDF</em>: moverlas, cambiar su tamaño o borrarlas.</span></div>
+          <div><span class="tile"><svg class="i"><use href="#i-eraser"/></svg></span><span><em>Tapar una zona</em> con un rectángulo blanco; quita el texto y las imágenes que quedan enteros debajo.</span></div>
+      </div>
+      <div class="notes">
+        <div><b>PDF FIRMADOS</b>Se avisa al abrirlos y se pide confirmación antes del primer cambio de contenido. Al guardar, la firma sigue siendo válida para su versión.</div>
+        <div><b>TAPAR NO ES BORRAR</b>Lo que queda tapado solo en parte sigue dentro del PDF. Para datos confidenciales, no basta.</div>
+      </div>
+    </section>
+
+    <section>
+      <h4>LÁPIZ DIGITAL</h4>
+      <ul>
+        <li>Dibuja con cualquier herramienta (ajuste «El lápiz dibuja siempre», en Dibujo).</li>
+        <li>La goma del lápiz o el botón lateral borran el trazo que tocan.</li>
+        <li>Con el lápiz cerca, ni el lápiz ni la palma desplazan la página.</li>
+        <li>Los trazos seguidos y cercanos se guardan juntos.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h4>EXTENSIÓN PARA EDGE, CHROME Y BRAVE</h4>
+      <p>Los PDF que abres en el navegador se ven con la interfaz de pdfiiuum, y <em>Abrir en la app</em>&nbsp;<span class="ti"><svg class="i"><use href="#i-app-window"/></svg></span>
+        o el menú del botón derecho los pasan a la app, que tiene que estar instalada. En la app, la pieza de
+        puzle&nbsp;<span class="ti"><svg class="i"><use href="#i-puzzle"/></svg></span> abre una guía con accesos directos. Se carga a mano una vez:</p>
+      <ol>
+        <li><span>Abre <kbd>edge://extensions</kbd> (o <kbd>chrome://extensions</kbd>, <kbd>brave://extensions</kbd>).</span></li>
+        <li><span>Activa <b>Modo de desarrollador</b>.</span></li>
+        <li><span>Pulsa <b>Cargar descomprimida</b> (en Edge, <b>Cargar desempaquetada</b>) y elige la carpeta <kbd>extension</kbd> de la instalación de pdfiiuum.</span></li>
+        <li><span>Para los PDF de tu equipo, activa <b>Permitir el acceso a las URL de archivo</b> en los detalles de la extensión.</span></li>
+      </ol>
+      <p>Al actualizar pdfiiuum, vuelve a cargarla (⟳). El globo&nbsp;<span class="ti"><svg class="i"><use href="#i-globe"/></svg></span> vuelve al visor del navegador para ese PDF.</p>
+    </section>
+
+    <section>
+      <h4>CONVIENE SABER</h4>
+      <ul>
+        <li>Las anotaciones son estándar: se ven en Acrobat, Edge y Chrome.</li>
+        <li>El autor de cada anotación es tu usuario de Windows.</li>
+        <li>Los enlaces del PDF se abren fuera tras confirmar la dirección.</li>
+        <li>Al guardar, el original se sustituye de una vez, sin quedar a medias.</li>
+      </ul>
+    </section>
+  </div>
+
+  <div class="foot"><span>Versión 0.4.4</span><span class="es">ES</span><span class="p">4</span></div>
+</body>
+</html>
