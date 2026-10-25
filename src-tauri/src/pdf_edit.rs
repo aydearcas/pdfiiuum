@@ -12,6 +12,7 @@ use std::path::Path;
 use pdfium_render::prelude::*;
 use serde::{Deserialize, Serialize};
 
+use crate::page_stream;
 use crate::pdf_engine::{engine, save, wide, Bindings};
 
 const PAGEOBJ_TEXT: c_int = 1;
@@ -153,9 +154,21 @@ pub fn edit_page(dll: &Path, pdf: &[u8], page: i32, edit: &PageEdit) -> Result<E
     let guard = engine(dll)?.lock().map_err(|_| "PDFium está bloqueado".to_string())?;
     let b = &*guard;
     unsafe {
+        if let PageEdit::Text { objects, text } = edit {
+            match replace_run_in_place(b, pdf, page, objects, text)? {
+                Ok(edited) => return Ok(edited),
+                #[cfg(debug_assertions)]
+                Err(why) => eprintln!("Corregir texto rehace la página: {why}"),
+                #[cfg(not(debug_assertions))]
+                Err(_) => {}
+            }
+        }
         with_page(b, pdf, page, |doc, page, tp| {
             let notice = match edit {
-                PageEdit::Text { objects, text } => replace_run(b, doc, page, tp, objects, text)?,
+                PageEdit::Text { objects, text } => {
+                    let notice = replace_run(b, doc, page, tp, objects, text)?;
+                    Some(notice.map_or(REWRITTEN.to_string(), |n| format!("{n}. {REWRITTEN}")))
+                }
                 PageEdit::AddText { x, y, text, size, color, font } => {
                     add_text(b, doc, page, [*x, *y], text, *size, *color, font)?
                 }
@@ -205,6 +218,7 @@ pub(crate) fn read_source(path: &Option<String>, data: &Option<String>, what: &s
 }
 
 const STALE: &str = "La página ha cambiado mientras se editaba; vuelve a intentarlo";
+const REWRITTEN: &str = "No se ha podido corregir la línea sin rehacer la página: revisa que el resto siga igual";
 
 unsafe fn remove(b: &Bindings, page: FPDF_PAGE, obj: FPDF_PAGEOBJECT) {
     if b.FPDFPage_RemoveObject(page, obj) != 0 {
@@ -231,15 +245,141 @@ unsafe fn replace_run(
     text: &str,
 ) -> Result<Option<String>, String> {
     let all = pieces(b, page, tp);
-    let targets: Vec<&Piece> = objects.iter().filter_map(|i| all.iter().find(|p| p.index == *i)).collect();
-    if targets.len() != objects.len() || targets.is_empty() {
-        return Err(STALE.into());
-    }
-    let notice = if text.trim().is_empty() { None } else { write_run(b, doc, page, &targets, text)? };
+    let targets = find_targets(&all, objects)?;
+    let notice = if text.trim().is_empty() {
+        None
+    } else {
+        write_run(b, doc, page, &targets, text, Some(targets[0].index as usize))?
+    };
     for t in &targets {
         remove(b, page, t.obj);
     }
     Ok(notice)
+}
+
+fn find_targets<'a>(all: &'a [Piece], objects: &[i32]) -> Result<Vec<&'a Piece>, String> {
+    let targets: Vec<&Piece> = objects.iter().filter_map(|i| all.iter().find(|p| p.index == *i)).collect();
+    if targets.len() != objects.len() || targets.is_empty() {
+        return Err(STALE.into());
+    }
+    Ok(targets)
+}
+
+/// Corrige el tramo sin regenerar el resto de la página. `FPDFPage_GenerateContent` reescribe
+/// entero el flujo del que se quita un objeto y pierde cosas (ver `page_stream`); añadir al
+/// final no toca los flujos que ya había. Así que PDFium escribe el texto nuevo al final y
+/// luego, a mano, se quitan del contenido original los operadores del tramo y el texto nuevo
+/// pasa a su sitio. Se comprueba con PDFium que los demás objetos siguen exactamente igual;
+/// si no se puede, `Err` dice por qué y se hace como antes.
+unsafe fn replace_run_in_place(
+    b: &Bindings,
+    pdf: &[u8],
+    index: i32,
+    objects: &[i32],
+    text: &str,
+) -> Result<Result<Edited, String>, String> {
+    let (saved, kept, added, ordinals, texts, notice) = with_page(b, pdf, index, |doc, page, tp| {
+        let all = pieces(b, page, tp);
+        let targets = find_targets(&all, objects)?;
+        let before = shapes(b, page, 0);
+
+        // Objetos de texto en el orden del contenido (los nuevos, al final) y cuáles son los del tramo.
+        let text_objects = |from: i32| {
+            (from..b.FPDFPage_CountObjects(page))
+                .map(|i| (i, b.FPDFPage_GetObject(page, i)))
+                .filter(|&(_, obj)| !obj.is_null() && b.FPDFPageObj_GetType(obj) == PAGEOBJ_TEXT)
+                .collect::<Vec<_>>()
+        };
+        let old = text_objects(0);
+        let ordinals: Vec<usize> = (0..old.len()).filter(|&k| objects.contains(&old[k].0)).collect();
+
+        let count = before.len() as i32;
+        let notice = if text.trim().is_empty() { None } else { write_run(b, doc, page, &targets, text, None)? };
+        let texts: Vec<page_stream::TextPos> = old
+            .into_iter()
+            .chain(text_objects(count))
+            .map(|(_, obj)| {
+                let mut m = FS_MATRIX { a: 0.0, b: 0.0, c: 0.0, d: 0.0, e: 0.0, f: 0.0 };
+                let mut tf = 0.0;
+                b.FPDFPageObj_GetMatrix(obj, &mut m);
+                b.FPDFTextObj_GetFontSize(obj, &mut tf);
+                page_stream::TextPos { x: m.e, unit: tf * m.a / 1000.0 }
+            })
+            .collect();
+        let kept: Vec<Shape> =
+            before.into_iter().enumerate().filter(|(i, _)| !objects.contains(&(*i as i32))).map(|(_, s)| s).collect();
+        let added = shapes(b, page, count);
+        if b.FPDFPage_GenerateContent(page) == 0 {
+            return Err("PDFium no pudo regenerar la página".into());
+        }
+        Ok((save(b, doc)?, kept, added, ordinals, texts, notice))
+    })?;
+
+    let out = match page_stream::replace_text(&saved, index as usize, &ordinals, &texts, !added.is_empty()) {
+        Ok(out) => out,
+        Err(e) => return Ok(Err(e)),
+    };
+    let after = match with_page(b, &out, index, |_, page, _| Ok(shapes(b, page, 0))) {
+        Ok(after) => after,
+        Err(e) => return Ok(Err(e)),
+    };
+    Ok(if unchanged_but(&kept, &added, &after) {
+        Ok(Edited { pdf: out, notice })
+    } else {
+        Err("los demás objetos de la página no han quedado igual".into())
+    })
+}
+
+/// Tipo, caja, matriz y color de cada objeto de la página desde `from`. (El texto que
+/// devuelve PDFium no sirve para comparar: depende de lo que tenga alrededor; p. ej., un
+/// guion a final de línea sale vacío o no según la línea anterior.)
+#[derive(Debug)]
+struct Shape {
+    kind: c_int,
+    bounds: [f32; 4],
+    matrix: [f32; 6],
+    color: [c_uint; 4],
+}
+
+unsafe fn shapes(b: &Bindings, page: FPDF_PAGE, from: i32) -> Vec<Shape> {
+    (from..b.FPDFPage_CountObjects(page))
+        .map(|i| {
+            let obj = b.FPDFPage_GetObject(page, i);
+            let mut m = FS_MATRIX { a: 0.0, b: 0.0, c: 0.0, d: 0.0, e: 0.0, f: 0.0 };
+            b.FPDFPageObj_GetMatrix(obj, &mut m);
+            let mut color = [0; 4];
+            let [r, g, bl, a] = &mut color;
+            b.FPDFPageObj_GetFillColor(obj, r, g, bl, a);
+            Shape {
+                kind: b.FPDFPageObj_GetType(obj),
+                bounds: bounds(b, obj).unwrap_or_default(),
+                matrix: [m.a, m.b, m.c, m.d, m.e, m.f],
+                color,
+            }
+        })
+        .collect()
+}
+
+fn same_shape(x: &Shape, y: &Shape) -> bool {
+    x.kind == y.kind
+        && x.color == y.color
+        && x.bounds.iter().zip(y.bounds).all(|(p, q)| (p - q).abs() < 0.02)
+        && x.matrix.iter().zip(y.matrix).all(|(p, q)| (p - q).abs() < 0.02)
+}
+
+fn same_shapes(a: &[Shape], b: &[Shape]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(x, y)| same_shape(x, y))
+}
+
+/// ¿Es `after` lo mismo que `kept`, en el mismo orden, con `added` seguido en algún sitio?
+fn unchanged_but(kept: &[Shape], added: &[Shape], after: &[Shape]) -> bool {
+    if after.len() != kept.len() + added.len() {
+        return false;
+    }
+    let n = added.len();
+    let prefix = kept.iter().zip(after).take_while(|(x, y)| same_shape(x, y)).count();
+    let suffix = kept.iter().rev().zip(after.iter().rev()).take_while(|(x, y)| same_shape(x, y)).count();
+    (kept.len().saturating_sub(suffix)..=prefix).any(|k| same_shapes(added, &after[k..k + n]))
 }
 
 unsafe fn images(b: &Bindings, page: FPDF_PAGE) -> Vec<ImageObject> {
@@ -671,13 +811,15 @@ enum Glyphs {
     Gap,
 }
 
-/// Escribe `text` en lugar del tramo. Devuelve un aviso si ha hecho falta otra tipografía.
+/// Escribe `text` en lugar del tramo, con los objetos nuevos a partir de la posición `at` o,
+/// sin ella, al final de la página. Devuelve un aviso si ha hecho falta otra tipografía.
 unsafe fn write_run(
     b: &Bindings,
     doc: FPDF_DOCUMENT,
     page: FPDF_PAGE,
     targets: &[&Piece],
     text: &str,
+    mut at: Option<usize>,
 ) -> Result<Option<String>, String> {
     let first = targets[0];
     let style = FontStyle::of(b, first.font);
@@ -693,7 +835,11 @@ unsafe fn write_run(
         // Sin incrustar, el lector pone una del sistema: vale lo que quepa en WinAnsi.
         wanted.iter().copied().filter(|&c| win_ansi(c)).collect()
     };
-    let has = |c: char| !wanted.contains(&c) || present.contains(&c);
+    // Los espacios del texto que da PDFium pueden ser huecos entre palabras (TJ) y no letras
+    // de la tipografía: si el espacio no tiene anchura, se deja hueco.
+    let mut space = 0.0;
+    b.FPDFFont_GetGlyphWidth(first.font, ' ' as c_uint, first.tf, &mut space);
+    let has = |c: char| (c != ' ' || space > 0.0) && (!wanted.contains(&c) || present.contains(&c));
     let missing: Vec<char> = text.chars().filter(|&c| c != ' ' && !has(c)).collect();
 
     let kind = |c: char| match (c == ' ', has(c)) {
@@ -758,7 +904,6 @@ unsafe fn write_run(
     let squeeze = if old_width > 0.0 && natural > old_width * 1.02 { (old_width / natural).max(MIN_SQUEEZE) } else { 1.0 };
 
     let mut x = first.m.e;
-    let mut at = first.index as usize;
     for ((k, s), w) in segments.iter().zip(&widths) {
         if *k != Glyphs::Gap {
             let font = if *k == Glyphs::Original { first.font } else { fallback };
@@ -775,11 +920,17 @@ unsafe fn write_run(
             }
             let m = FS_MATRIX { a: first.m.a * squeeze, e: x, ..first.m };
             b.FPDFPageObj_SetMatrix(obj, &m);
-            if b.FPDFPage_InsertObjectAtIndex(page, obj, at) == 0 {
+            let placed = match at.as_mut() {
+                Some(i) => {
+                    *i += 1;
+                    b.FPDFPage_InsertObjectAtIndex(page, obj, *i - 1)
+                }
+                None => b.FPDFPage_InsertObject(page, obj),
+            };
+            if placed == 0 {
                 b.FPDFPageObj_Destroy(obj);
                 return Err("No se pudo colocar el texto en la página".into());
             }
-            at += 1;
         }
         x += w * squeeze;
     }
@@ -943,6 +1094,131 @@ mod tests {
     fn rejects_stale_objects() {
         let pdf = sample();
         assert!(edit_text_for_tests(&dll(), &pdf, 0, &[99], "x").is_err());
+    }
+
+    /// PDF de una página de 300 × 200 con `content` como contenido, Helvetica (F1) y Times (F2).
+    fn pdf_with(content: &[u8]) -> Vec<u8> {
+        let objects = [
+            b"<< /Type /Catalog /Pages 2 0 R >>".to_vec(),
+            b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_vec(),
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Contents 4 0 R               /Resources << /Font << /F1 5 0 R /F2 6 0 R >> >> >>"
+                .to_vec(),
+            [format!("<< /Length {} >>
+stream
+", content.len()).as_bytes(), content, b"
+endstream"].concat(),
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>".to_vec(),
+            b"<< /Type /Font /Subtype /Type1 /BaseFont /Times-Roman /Encoding /WinAnsiEncoding >>".to_vec(),
+        ];
+        let mut out = b"%PDF-1.4
+".to_vec();
+        let mut offsets = Vec::new();
+        for (i, object) in objects.iter().enumerate() {
+            offsets.push(out.len());
+            out.extend(format!("{} 0 obj
+", i + 1).as_bytes());
+            out.extend(object);
+            out.extend(b"
+endobj
+");
+        }
+        let xref = out.len();
+        out.extend(format!("xref
+0 {}
+0000000000 65535 f 
+", objects.len() + 1).as_bytes());
+        for o in offsets {
+            out.extend(format!("{o:010} 00000 n 
+").as_bytes());
+        }
+        out.extend(format!("trailer
+<< /Size {} /Root 1 0 R >>
+startxref
+{xref}
+%%EOF
+", objects.len() + 1).as_bytes());
+        out
+    }
+
+    fn objects_of(pdf: &[u8]) -> Vec<Shape> {
+        let guard = engine(&dll()).unwrap().lock().unwrap();
+        unsafe { with_page(&guard, pdf, 0, |_, page, _| Ok(shapes(&guard, page, 0))).unwrap() }
+    }
+
+    /// La página pintada a 2 píxeles por punto (BGRA) y su ancho.
+    fn render(pdf: &[u8]) -> (Vec<u8>, usize) {
+        let guard = engine(&dll()).unwrap().lock().unwrap();
+        let b = &*guard;
+        unsafe {
+            with_page(b, pdf, 0, |_, page, _| {
+                let (w, h) = ((b.FPDF_GetPageWidthF(page) * 2.0) as i32, (b.FPDF_GetPageHeightF(page) * 2.0) as i32);
+                let bitmap = b.FPDFBitmap_Create(w, h, 1);
+                b.FPDFBitmap_FillRect(bitmap, 0, 0, w, h, 0xFFFFFFFF);
+                b.FPDF_RenderPageBitmap(bitmap, page, 0, 0, w, h, 0, 0);
+                let stride = b.FPDFBitmap_GetStride(bitmap) as usize;
+                let buffer = b.FPDFBitmap_GetBuffer(bitmap) as *const u8;
+                let mut out = Vec::new();
+                for y in 0..h as usize {
+                    out.extend_from_slice(std::slice::from_raw_parts(buffer.add(y * stride), w as usize * 4));
+                }
+                b.FPDFBitmap_Destroy(bitmap);
+                Ok((out, w as usize))
+            })
+            .unwrap()
+        }
+    }
+
+    /// Corregir una línea no mueve ni cambia nada más de la página: ni el texto con espaciado
+    /// entre letras (Tc) y palabras (Tw), ni lo que sigue en la misma línea con otra letra, ni
+    /// los colores CMYK, ni las imágenes. (Antes PDFium reescribía el flujo entero y lo perdía.)
+    #[test]
+    fn editing_a_line_leaves_the_rest_of_the_page_alone() {
+        let pdf = pdf_with(
+            b"0.2 0 0 0.6 k 20 160 120 20 re f
+              BT /F1 12 Tf -0.4 Tc 1.5 Tw 30 130 Td (Primera linea con espaciado) Tj
+              0 -20 TD (Segunda linea) Tj /F2 12 Tf ( sigue en Times) Tj
+              T* [(Ter) 120 (cera linea)] TJ ET
+              q 20 0 0 20 240 20 cm BI /W 2 /H 2 /BPC 8 /CS /G ID \x00\x80\xff\x40 EI Q",
+        );
+        let runs = runs_of(&dll(), &pdf, 0).unwrap();
+        let texts: Vec<&str> = runs.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(texts, ["Primera linea con espaciado", "Segunda linea", " sigue en Times", "Tercera linea"]);
+        let second = &runs[1];
+        let before = objects_of(&pdf);
+
+        let edited = edit_text_for_tests(&dll(), &pdf, 0, &second.objects, "Segunda lineas").unwrap();
+        assert!(edited.notice.is_none(), "{:?}", edited.notice);
+        let after_runs = runs_of(&dll(), &edited.pdf, 0).unwrap();
+        let after_texts: Vec<&str> = after_runs.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(after_texts, ["Primera linea con espaciado", "Segunda lineas", " sigue en Times", "Tercera linea"]);
+
+        // Los demás objetos, en el mismo orden, sitio, tamaño y color; el nuevo, donde estaba.
+        let after = objects_of(&edited.pdf);
+        assert_eq!(before.len(), after.len());
+        let edited_index = second.objects[0] as usize;
+        for (k, (old, new)) in before.iter().zip(&after).enumerate() {
+            if k == edited_index {
+                // Mismo origen (si no cabe se estrecha un poco: cambia la escala horizontal).
+                assert_eq!(old.matrix[4..], new.matrix[4..]);
+            } else {
+                assert!(same_shape(old, new), "objeto {k}: {old:?} → {new:?}");
+            }
+        }
+
+        // Y se ve igual salvo esa línea (con la letra añadida).
+        let ((old, w), (new, _)) = (render(&pdf), render(&edited.pdf));
+        let h = old.len() / 4 / w;
+        let [x1, y1, x2, y2] = second.rect;
+        for (i, (p, q)) in old.chunks(4).zip(new.chunks(4)).enumerate() {
+            if p != q {
+                let (x, y) = ((i % w) as f32 / 2.0, (h - i / w) as f32 / 2.0);
+                assert!(
+                    x >= x1 - 1.0 && x <= x2 + second.size && y >= y1 - 2.0 && y <= y2 + 2.0,
+                    "ha cambiado ({x}, {y}), fuera de la línea {:?}",
+                    second.rect
+                );
+            }
+        }
     }
 }
 

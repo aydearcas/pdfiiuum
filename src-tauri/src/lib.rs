@@ -1,5 +1,6 @@
 mod extension_setup;
 pub mod native_host;
+mod page_stream;
 mod pdf_edit;
 mod pdf_pages;
 mod pdf_engine;
