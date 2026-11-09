@@ -69,6 +69,7 @@ Para desarrollar: `npm run build:extension` compila el visor en `browser-extensi
 - Menú al seleccionar texto: comentar, resaltar, subrayar, tachar y copiar.
 - Panel lateral con todos los comentarios y resaltados del documento, en orden de lectura. El autor es el usuario de Windows.
 - Lápiz digital: dibuja con cualquier herramienta, borra con la goma o el botón lateral y agrupa los trazos de cada palabra.
+- Formularios PDF: se rellenan los campos de texto, casillas, opciones y desplegables, y lo escrito se guarda en el propio PDF (también en el visor del navegador y en PDF firmados, sin invalidar la firma). No se ejecuta el JavaScript de los formularios.
 
 ### Editar el PDF (solo en la app de escritorio)
 

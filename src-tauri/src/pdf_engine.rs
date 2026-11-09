@@ -515,13 +515,91 @@ mod tests {
     /// PDF con un campo de firma rellenado. No lleva criptografía real: a PDFium le basta el
     /// diccionario /Sig para contarlo como firmado.
     fn signed_sample() -> Vec<u8> {
-        let objects = [
+        build_pdf(&[
             "<</Type/Catalog/Pages 2 0 R/AcroForm<</Fields[4 0 R]/SigFlags 3>>>>",
             "<</Type/Pages/Kids[3 0 R]/Count 1>>",
             "<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 300]/Annots[4 0 R]>>",
             "<</Type/Annot/Subtype/Widget/FT/Sig/T(Firma)/Rect[0 0 0 0]/P 3 0 R/V 5 0 R>>",
             "<</Type/Sig/Filter/Adobe.PPKLite/SubFilter/adbe.pkcs7.detached/ByteRange[0 0 0 0]/Contents<00>>>",
-        ];
+        ])
+    }
+
+    /// Formulario ya rellenado, como lo deja pdf.js al guardar: /V en el campo (en el padre si es
+    /// jerárquico) y /AS en la casilla.
+    fn form_sample() -> Vec<u8> {
+        build_pdf(&[
+            "<</Type/Catalog/Pages 2 0 R/AcroForm<</Fields[4 0 R 5 0 R 7 0 R]>>>>",
+            "<</Type/Pages/Kids[3 0 R]/Count 1>>",
+            "<</Type/Page/Parent 2 0 R/MediaBox[0 0 300 300]/Annots[4 0 R 6 0 R 7 0 R]>>",
+            "<</Type/Annot/Subtype/Widget/FT/Tx/T(nombre)/V(Aythami)/Rect[100 250 280 270]/P 3 0 R/DA(/Helv 12 Tf 0 g)>>",
+            "<</FT/Tx/T(persona)/V(de Armas)/Kids[6 0 R]>>",
+            "<</Type/Annot/Subtype/Widget/T(apellido)/Parent 5 0 R/Rect[100 220 280 240]/P 3 0 R/DA(/Helv 12 Tf 0 g)>>",
+            "<</Type/Annot/Subtype/Widget/FT/Btn/T(acepto)/V/Yes/AS/Yes/Rect[100 190 112 202]/P 3 0 R/AP<</N<</Yes 8 0 R/Off 8 0 R>>>>>>",
+            "<</Type/XObject/Subtype/Form/BBox[0 0 12 12]/Length 0>>\nstream\n\nendstream",
+        ])
+    }
+
+    /// Nombre completo y valor de cada campo del formulario, según PDFium.
+    fn form_values(dll: &Path, pdf: &[u8]) -> Vec<(String, String)> {
+        let guard = engine(dll).unwrap().lock().unwrap();
+        let b = &*guard;
+        let read = |f: &dyn Fn(*mut FPDF_WCHAR, c_ulong) -> c_ulong| {
+            let len = f(std::ptr::null_mut(), 0);
+            let mut buf = vec![0u16; (len as usize) / 2];
+            f(buf.as_mut_ptr() as *mut FPDF_WCHAR, len);
+            while buf.last() == Some(&0) {
+                buf.pop();
+            }
+            String::from_utf16_lossy(&buf)
+        };
+        let mut out = Vec::new();
+        unsafe {
+            let doc = b.FPDF_LoadMemDocument64(pdf, None);
+            assert!(!doc.is_null());
+            let mut info: FPDF_FORMFILLINFO = std::mem::zeroed();
+            info.version = 2;
+            let form = b.FPDFDOC_InitFormFillEnvironment(doc, &mut info);
+            for p in 0..b.FPDF_GetPageCount(doc) {
+                let page = b.FPDF_LoadPage(doc, p);
+                for i in 0..b.FPDFPage_GetAnnotCount(page) {
+                    let annot = b.FPDFPage_GetAnnot(page, i);
+                    if b.FPDFAnnot_GetSubtype(annot) as c_int == 20 {
+                        let name = read(&|buf, len| b.FPDFAnnot_GetFormFieldName(form, annot, buf, len));
+                        let value = read(&|buf, len| b.FPDFAnnot_GetFormFieldValue(form, annot, buf, len));
+                        out.push((name, value));
+                    }
+                    b.FPDFPage_CloseAnnot(annot);
+                }
+                b.FPDF_ClosePage(page);
+            }
+            b.FPDFDOC_ExitFormFillEnvironment(form);
+            b.FPDF_CloseDocument(doc);
+        }
+        out
+    }
+
+    #[test]
+    fn form_values_survive_annotations() {
+        let dll = Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/pdfium.dll");
+        let expected: Vec<(String, String)> = [("nombre", "Aythami"), ("persona.apellido", "de Armas"), ("acepto", "Yes")]
+            .iter()
+            .map(|(n, v)| (n.to_string(), v.to_string()))
+            .collect();
+        let pdf = form_sample();
+        assert_eq!(form_values(&dll, &pdf), expected);
+        // Guardar anotaciones no toca lo escrito en el formulario…
+        let annot: Annot =
+            serde_json::from_str(r#"{"kind":"highlight","page":0,"color":[255,212,0],"rects":[[50,100,200,120]]}"#).unwrap();
+        let out = apply_annotations(&dll, &pdf, &[], &[annot]).unwrap();
+        assert_eq!(form_values(&dll, &out), expected);
+        // …y la copia que se muestra conserva los campos con sus nombres (la interfaz los empareja
+        // por nombre para escribir los valores en el PDF real).
+        let ex = extract_annotations(&dll, &out).unwrap();
+        assert_eq!(ex.annots.len(), 1);
+        assert_eq!(form_values(&dll, &ex.display.unwrap()), expected);
+    }
+
+    fn build_pdf(objects: &[&str]) -> Vec<u8> {
         let mut out = b"%PDF-1.7\n".to_vec();
         let mut offsets = Vec::new();
         for (i, o) in objects.iter().enumerate() {

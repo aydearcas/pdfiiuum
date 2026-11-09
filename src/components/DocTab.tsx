@@ -9,6 +9,7 @@ import { closePdf, type PDFDocument } from "../lib/pdf";
 import CommentsPanel, { sortItems, type PanelItem } from "./CommentsPanel";
 import { bounds, diffAnnots, newId, pdfDate, toNative, type Annot, type MarkupKind } from "../lib/annotations";
 import { openDocument } from "../lib/document";
+import { bakeForm, markFormSaved, watchForm } from "../lib/forms";
 import type { TextSelection } from "../lib/selection";
 import { isEditTool, type EditTool, type Tool, type ToolStyle } from "../lib/tools";
 import type { PageContent, PageEdit, PagesEdit } from "../lib/edit";
@@ -68,7 +69,7 @@ export interface TabSnapshot {
   name: string;
   annots: Annot[];
   view?: ViewState;
-  /** Hay texto corregido sin guardar (no viaja con la pestaña). */
+  /** Hay texto corregido o un formulario rellenado sin guardar (no viajan con la pestaña). */
   edited?: boolean;
 }
 
@@ -150,7 +151,9 @@ export default function DocTab(p: Props) {
   const [pageSel, setPageSel] = useState<number[]>([]);
   const editBusy = useRef(false);
   const edited = doc.bytes !== diskBytes.current;
-  const dirty = changes.dirty || edited;
+  // Valores escritos en los campos del formulario que aún no están en el archivo.
+  const [formDirty, setFormDirty] = useState(false);
+  const dirty = changes.dirty || edited || formDirty;
   const editMode = isEditTool(tool);
   const viewer = useRef<ViewerHandle>(null);
   const [author, setAuthor] = useState("");
@@ -182,6 +185,24 @@ export default function DocTab(p: Props) {
   }, [doc.pdf]);
 
   docRef.current = doc;
+  // La ref cambia en el mismo instante en que se escribe (Ctrl+S puede llegar antes del render).
+  const formDirtyRef = useRef(false);
+  useEffect(() => {
+    formDirtyRef.current = false;
+    setFormDirty(false);
+    return watchForm(doc.pdf, (modified) => {
+      formDirtyRef.current = modified;
+      setFormDirty(modified);
+    });
+  }, [doc.pdf]);
+  /**
+   * Los bytes del PDF con lo escrito en el formulario. Si no hay nada pendiente, los mismos: tras
+   * guardar, los valores ya están en el archivo aunque pdf.js los siga teniendo en los campos.
+   */
+  const withForm = useCallback(
+    async () => (formDirtyRef.current ? bakeForm(docRef.current.pdf, docRef.current.bytes) : docRef.current.bytes),
+    [],
+  );
   const annotsRef = useRef(annots);
   annotsRef.current = annots;
   const changesRef = useRef(changes);
@@ -199,10 +220,12 @@ export default function DocTab(p: Props) {
       try {
         const d = docRef.current;
         const view = viewer.current?.viewState();
-        const reopened = await openDocument(d.bytes);
+        // Lo escrito en el formulario pasa al PDF: el documento que se ve se sustituye.
+        const bytes = await withForm();
+        const reopened = await openDocument(bytes);
         const merged = [...reopened.baseline, ...annotsRef.current];
         // Las refs se actualizan ya: quien espera a esta promesa ve el PDF editable sin esperar al render.
-        docRef.current = { ...d, ...reopened, view };
+        docRef.current = { ...d, ...reopened, bytes, view };
         annotsRef.current = merged;
         setDoc(docRef.current);
         history.reset(merged);
@@ -214,7 +237,7 @@ export default function DocTab(p: Props) {
       }
     })();
     return editable.current;
-  }, [history.reset]);
+  }, [history.reset, withForm]);
 
   /** Lee las anotaciones del PDF si aún no se han leído; false si no se ha podido. */
   const loadExisting = useCallback(async () => {
@@ -320,21 +343,23 @@ export default function DocTab(p: Props) {
         // Visor del navegador: si hay que leer las anotaciones del PDF (o se están leyendo), antes.
         await (changesRef.current.dirty ? ensureEditable() : editable.current);
         const d = docRef.current;
+        const bytes = await withForm();
         const { remove, add, dirty: hasChanges } = changesRef.current;
         if (!hasChanges) {
-          // Sin cambios en anotaciones: el archivo tal cual, con el texto corregido si lo hay
-          // (pdf.js muestra una copia sin las anotaciones).
-          const target = await savePdf(d.bytes, d.name, d.path, saveAs || !savesInPlace);
+          // Sin cambios en anotaciones: el archivo tal cual, con el texto corregido y el formulario
+          // si los hay (pdf.js muestra una copia sin las anotaciones).
+          const target = await savePdf(bytes, d.name, d.path, saveAs || !savesInPlace);
           if (!target) return;
           if (savesInPlace) {
-            diskBytes.current = d.bytes;
-            setDoc({ ...d, name: baseName(target), path: target });
+            diskBytes.current = bytes;
+            setDoc({ ...d, bytes, name: baseName(target), path: target });
             setEdits({ past: [], future: [] });
+            markFormSaved(d.pdf);
           }
           notify(savesInPlace ? `Guardado: ${baseName(target)}` : "Descarga iniciada");
           return;
         }
-        const result = await saveAnnotated(d.bytes, { remove, add: add.map(toNative) }, d.name, d.path, saveAs);
+        const result = await saveAnnotated(bytes, { remove, add: add.map(toNative) }, d.name, d.path, saveAs);
         if (!result) return;
         diskBytes.current = result.bytes;
         setEdits({ past: [], future: [] });
@@ -352,7 +377,7 @@ export default function DocTab(p: Props) {
         setSaving(false);
       }
     },
-    [notify, saving, history.reset, clearSelection, ensureEditable],
+    [notify, saving, history.reset, clearSelection, ensureEditable, withForm],
   );
 
   // Crear resaltados/subrayados/tachados a partir de la selección de texto. Si aún no se han
@@ -455,7 +480,8 @@ export default function DocTab(p: Props) {
       try {
         await ensureEditable();
         if (!(await confirmSignedEdit())) return false;
-        const before = docRef.current.bytes;
+        // El formulario se escribe antes en el PDF: así sigue ahí al recargarlo y al deshacer.
+        const before = await withForm();
         const result = await editPage(before, n, change);
         await showBytes(result.bytes);
         setEdits((s) => ({ past: [...s.past, { bytes: before, pages: false }].slice(-50), future: [] }));
@@ -468,7 +494,7 @@ export default function DocTab(p: Props) {
         editBusy.current = false;
       }
     },
-    [showBytes, notify, ensureEditable, confirmSignedEdit],
+    [showBytes, notify, ensureEditable, confirmSignedEdit, withForm],
   );
 
   /** Imagen elegida por el usuario, en el centro de la página actual y como mucho al 60 %. */
@@ -527,9 +553,9 @@ export default function DocTab(p: Props) {
       try {
         await ensureEditable();
         if (!(await confirmSignedEdit())) return;
-        const d = docRef.current;
         const { remove, add, dirty: pending } = changesRef.current;
-        const base = pending ? await bakeAnnotations(d.bytes, { remove, add: add.map(toNative) }) : d.bytes;
+        const bytes = await withForm();
+        const base = pending ? await bakeAnnotations(bytes, { remove, add: add.map(toNative) }) : bytes;
         const count = await showBytes(await editPages(base, edit), true);
         setEdits((s) => ({ past: [...s.past, { bytes: base, pages: true }].slice(-50), future: [] }));
         setPageSel(select(count).filter((n) => n >= 1 && n <= count));
@@ -539,7 +565,7 @@ export default function DocTab(p: Props) {
         editBusy.current = false;
       }
     },
-    [showBytes, notify, ensureEditable, confirmSignedEdit],
+    [showBytes, notify, ensureEditable, confirmSignedEdit, withForm],
   );
 
   const pageCount = doc.pdf.numPages;
@@ -584,7 +610,8 @@ export default function DocTab(p: Props) {
         try {
           const d = docRef.current;
           const { remove, add, dirty: pending } = changesRef.current;
-          const base = pending ? await bakeAnnotations(d.bytes, { remove, add: add.map(toNative) }) : d.bytes;
+          const bytes = await withForm();
+          const base = pending ? await bakeAnnotations(bytes, { remove, add: add.map(toNative) }) : bytes;
           const out = await extractPages(base, selection);
           const stem = d.name.replace(/\.pdf$/i, "");
           const label = selection.length === 1 ? `pág. ${selection[0]}` : `págs. ${selection.join(", ")}`;
@@ -637,14 +664,15 @@ export default function DocTab(p: Props) {
         name: docRef.current.name,
         annots: annotsRef.current,
         view: viewer.current?.viewState(),
-        edited: docRef.current.bytes !== diskBytes.current,
+        edited: docRef.current.bytes !== diskBytes.current || formDirtyRef.current,
       }),
       insertImage,
       download: async () => {
         try {
           const d = docRef.current;
           const { remove, add, dirty: pending } = changesRef.current;
-          downloadPdf(pending ? await bakeAnnotations(d.bytes, { remove, add: add.map(toNative) }) : d.bytes, d.name);
+          const bytes = await withForm();
+          downloadPdf(pending ? await bakeAnnotations(bytes, { remove, add: add.map(toNative) }) : bytes, d.name);
         } catch (e) {
           notify(`No se pudo descargar: ${e instanceof Error ? e.message : e}`, true);
         }
@@ -653,8 +681,9 @@ export default function DocTab(p: Props) {
         try {
           const d = docRef.current;
           const { remove, add, dirty: pending } = changesRef.current;
-          // Con las anotaciones sin guardar escritas, para que la app muestre lo mismo.
-          const bytes = pending ? await bakeAnnotations(d.bytes, { remove, add: add.map(toNative) }) : d.bytes;
+          // Con las anotaciones y el formulario sin guardar escritos, para que la app muestre lo mismo.
+          const filled = await withForm();
+          const bytes = pending ? await bakeAnnotations(filled, { remove, add: add.map(toNative) }) : filled;
           const path = await openInApp(bytes, d.name);
           notify(`Abierto en pdfiiuum (guardado en ${baseName(path)})`);
         } catch (e) {
@@ -662,7 +691,7 @@ export default function DocTab(p: Props) {
         }
       },
     }),
-    [save, history.undo, history.redo, selectedId, onDelete, clearSelection, editMode, undoEdit, insertImage, tool, deletePages],
+    [save, history.undo, history.redo, selectedId, onDelete, clearSelection, editMode, undoEdit, insertImage, tool, deletePages, withForm],
   );
 
   // Panel lateral: notas y marcas en orden de lectura; «Sin guardar» las nuevas o cambiadas.

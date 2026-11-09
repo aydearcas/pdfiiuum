@@ -231,7 +231,7 @@ export default function App() {
       const snap = handles.current.get(id)?.snapshot();
       if (!snap?.path) return;
       if (snap.edited) {
-        notify("Guarda el PDF antes de moverlo a otra ventana: el texto corregido aún no está en el archivo", true);
+        notify("Guarda el PDF antes de moverlo a otra ventana: el texto corregido o el formulario aún no están en el archivo", true);
         return;
       }
       const sole = tabsRef.current.length === 1;
@@ -307,7 +307,7 @@ export default function App() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const mod = e.ctrlKey || e.metaKey;
-      const typing = !!(e.target as HTMLElement).closest("input, textarea, [contenteditable]");
+      const typing = !!(e.target as HTMLElement).closest("input, textarea, select, [contenteditable]");
       const k = e.key.toLowerCase();
       const tab = activeRef.current ? handles.current.get(activeRef.current) : undefined;
       const go = (fn: () => void) => {
