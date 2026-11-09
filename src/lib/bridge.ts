@@ -2,6 +2,8 @@
 // anotaciones, editar, organizar páginas) lo hace la app instalada, a través del mismo puente
 // de mensajería nativa que «Abrir en pdfiiuum» (src-tauri/src/native_host.rs, «sesión»).
 
+import { knownPasswords } from "./passwords";
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 declare const chrome: any;
 
@@ -20,6 +22,8 @@ let seq = 0;
 const pending = new Map<number, Pending>();
 /** El PDF que tiene ahora el puente: si se vuelve a usar el mismo, no hace falta mandarlo. */
 let hostHas: Uint8Array | null = null;
+/** Contraseñas de PDF cifrados que ya conoce el puente (empieza sin ninguna en cada conexión). */
+let hostPasswords = 0;
 /** Las llamadas van de una en una para saber siempre qué PDF tiene el puente. */
 let queue: Promise<unknown> = Promise.resolve();
 
@@ -48,6 +52,7 @@ function connect() {
     const error = new Error(friendly(chrome.runtime.lastError?.message));
     port = null;
     hostHas = null;
+    hostPasswords = 0;
     for (const job of pending.values()) job.reject(error);
     pending.clear();
   });
@@ -60,18 +65,27 @@ function connect() {
  * resultado y, si la operación produce un PDF, sus bytes.
  */
 export function call<T>(cmd: string, args: unknown, pdf?: Uint8Array): Promise<{ result: T; bytes: Uint8Array | null }> {
+  const request = (p: { postMessage(m: unknown): void }, cmd: string, args: unknown) => {
+    const id = ++seq;
+    return new Promise<{ result: unknown; bytes: Uint8Array | null; current: boolean }>((resolve, reject) => {
+      pending.set(id, { parts: [], resolve, reject });
+      p.postMessage({ type: "call", id, cmd, args });
+    });
+  };
   const run = async () => {
     const p = connect();
+    // Las contraseñas escritas en el visor, antes de que el puente abra un PDF cifrado.
+    const passwords = knownPasswords();
+    while (hostPasswords < passwords.length) {
+      await request(p, "add_password", { password: passwords[hostPasswords] });
+      hostPasswords++;
+    }
     if (pdf && pdf !== hostHas) {
       p.postMessage({ type: "put", size: pdf.length });
       for (let i = 0; i < pdf.length; i += CHUNK) p.postMessage({ type: "part", data: toBase64(pdf.subarray(i, i + CHUNK)) });
       hostHas = pdf;
     }
-    const id = ++seq;
-    const reply = await new Promise<{ result: unknown; bytes: Uint8Array | null; current: boolean }>((resolve, reject) => {
-      pending.set(id, { parts: [], resolve, reject });
-      p.postMessage({ type: "call", id, cmd, args });
-    });
+    const reply = await request(p, cmd, args);
     if (reply.current && reply.bytes) hostHas = reply.bytes;
     return { result: reply.result as T, bytes: reply.bytes };
   };

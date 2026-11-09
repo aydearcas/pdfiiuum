@@ -12,6 +12,7 @@ import {
   normalize,
   pdfDate,
   type Annot,
+  type InkAnnot,
   type Point,
   type Rect,
   type TextAnnot,
@@ -29,6 +30,7 @@ import {
   strokeAt,
 } from "../lib/ink";
 import { isEditTool, type Tool, type ToolStyle } from "../lib/tools";
+import { signatureAnnot, signatureInView, useSignature } from "../lib/signature";
 
 export interface LayerCallbacks {
   onCreate(a: Annot): void;
@@ -40,7 +42,17 @@ export interface LayerCallbacks {
   onEdit(id: string | null): void;
 }
 
+/** Firma con certificado: el sello que se coloca con un clic (tamaño en puntos, derecho en pantalla). */
+export interface SealPlacement {
+  width: number;
+  height: number;
+  lines: string[];
+  onPlace(page: number, rect: Rect): void;
+}
+
 interface Props extends LayerCallbacks {
+  /** Colocando el sello de la firma con certificado: un clic lo pone, sea cual sea la herramienta. */
+  seal?: SealPlacement | null;
   page: number;
   viewport: PageViewport;
   annots: Annot[];
@@ -75,7 +87,36 @@ export default function AnnotationLayer(p: Props) {
     return vp.convertToPdfPoint(e.clientX - box.left, e.clientY - box.top) as Point;
   };
 
-  const creating = p.tool === "note" || p.tool === "text" || p.tool === "ink";
+  const seal = p.seal ?? null;
+  const creating = !!seal || p.tool === "note" || p.tool === "text" || p.tool === "ink" || p.tool === "sign";
+  const signature = useSignature();
+  // Vista previa de la firma bajo el puntero: se mueve sin pasar por React.
+  const ghostRef = useRef<SVGGElement>(null);
+  const ghost = p.tool === "sign" && signature ? signatureInView(signature, [0, 0], scale, vp.width) : null;
+  const moveGhost = (e: RPointerEvent) => {
+    const g = ghostRef.current;
+    if (!g) return;
+    const box = rootRef.current!.getBoundingClientRect();
+    g.setAttribute("transform", `translate(${e.clientX - box.left} ${e.clientY - box.top})`);
+    g.style.display = "";
+  };
+  // Sello de la firma con certificado: centrado en el puntero y siempre dentro de la página.
+  const sealRef = useRef<HTMLDivElement>(null);
+  const sealBox = (e: { clientX: number; clientY: number }) => {
+    const box = rootRef.current!.getBoundingClientRect();
+    const w = Math.min(seal!.width * scale, vp.width);
+    const h = Math.min(seal!.height * scale, vp.height);
+    const left = Math.max(0, Math.min(vp.width - w, e.clientX - box.left - w / 2));
+    const top = Math.max(0, Math.min(vp.height - h, e.clientY - box.top - h / 2));
+    return { left, top, w, h };
+  };
+  const moveSeal = (e: RPointerEvent) => {
+    const el = sealRef.current;
+    if (!el) return;
+    const { left, top } = sealBox(e);
+    el.style.transform = `translate(${left}px, ${top}px)`;
+    el.style.display = "";
+  };
 
   // Los listeners de dibujo viven fuera de React: ven siempre las props más recientes.
   const latest = useRef(p);
@@ -85,12 +126,32 @@ export default function AnnotationLayer(p: Props) {
   const onPointerDown = (e: RPointerEvent) => {
     // Fuera de las herramientas de creación la capa no recibe clics (pointer-events: none).
     // El dibujo lo atiende useInk antes de que el evento llegue aquí.
+    if (seal && e.button === 0) {
+      e.preventDefault();
+      e.stopPropagation();
+      const { left, top, w, h } = sealBox(e);
+      const [x1, y1] = vp.convertToPdfPoint(left, top + h) as Point;
+      const [x2, y2] = vp.convertToPdfPoint(left + w, top) as Point;
+      seal.onPlace(p.page, [Math.min(x1, x2), Math.min(y1, y2), Math.max(x1, x2), Math.max(y1, y2)]);
+      return;
+    }
     if (e.button !== 0 || !creating || p.tool === "ink") return;
     e.preventDefault();
     e.stopPropagation();
     // Con un texto a medio escribir, el clic fuera solo lo confirma (preventDefault evita el blur).
     if (draftText || document.activeElement?.classList.contains("text-editor")) {
       (document.activeElement as HTMLElement | null)?.blur();
+      return;
+    }
+    if (p.tool === "sign") {
+      if (!signature) return;
+      const box = rootRef.current!.getBoundingClientRect();
+      const at: Point = [e.clientX - box.left, e.clientY - box.top];
+      // Lo que se dibuje con el lápiz justo después no se junta con la firma.
+      lastInk.id = null;
+      p.onCreate(
+        signatureAnnot(signature, p.page, at, scale, vp.width, ([x, y]) => vp.convertToPdfPoint(x, y) as Point),
+      );
       return;
     }
     const pt = toPdf(e);
@@ -131,9 +192,30 @@ export default function AnnotationLayer(p: Props) {
   return (
     <div
       ref={rootRef}
-      className={`annot-layer${creating ? " creating" : ""} tool-${p.tool}`}
+      className={`annot-layer${creating ? " creating" : ""} ${seal ? "placing-seal" : `tool-${p.tool}`}`}
       onPointerDown={onPointerDown}
+      onPointerMove={seal ? moveSeal : ghost ? moveGhost : undefined}
+      onPointerLeave={() => {
+        if (ghostRef.current) ghostRef.current.style.display = "none";
+        if (sealRef.current) sealRef.current.style.display = "none";
+      }}
     >
+      {seal && (
+        <div
+          ref={sealRef}
+          className="seal-ghost"
+          style={{
+            display: "none",
+            width: Math.min(seal.width * scale, vp.width),
+            height: Math.min(seal.height * scale, vp.height),
+            fontSize: Math.min(seal.height / (seal.lines.length * 1.25), 10) * scale,
+          }}
+        >
+          {seal.lines.map((l, i) => (
+            <span key={i}>{l}</span>
+          ))}
+        </div>
+      )}
       <svg className="annot-svg" width={vp.width} height={vp.height}>
         {p.annots.map((a) => {
           if (a.kind === "highlight")
@@ -177,6 +259,25 @@ export default function AnnotationLayer(p: Props) {
         <path ref={draftRef} className="ink" />
         <circle ref={cursorRef} className="pen-cursor" />
         {selected && <rect className="sel-outline" {...xywh(pad(toBox(bounds(selected)), 3))} />}
+        {selected?.kind === "ink" && p.tool === "select" && (
+          <rect
+            className="resize-handle"
+            {...(() => {
+              const b = pad(toBox(bounds(selected)), 3);
+              return { x: b.left + b.width - 5, y: b.top + b.height - 5, width: 10, height: 10 };
+            })()}
+            onPointerDown={(e) => startResize(e, selected)}
+          >
+            <title>Arrastra para cambiar el tamaño</title>
+          </rect>
+        )}
+        {ghost && (
+          <g ref={ghostRef} className="sign-ghost" style={{ display: "none" }}>
+            {ghost.strokes.map((s, i) => (
+              <path key={i} className="ink" d={smoothPathD(s)} stroke={signature!.color} strokeWidth={ghost.width} />
+            ))}
+          </g>
+        )}
       </svg>
 
       {p.annots.map((a) => {
@@ -298,6 +399,50 @@ export default function AnnotationLayer(p: Props) {
     target.addEventListener("pointermove", onMove as EventListener);
     target.addEventListener("pointerup", onUp);
   }
+
+  /**
+   * Cambia el tamaño de un dibujo (o una firma) desde la esquina inferior derecha, sin deformarlo:
+   * la esquina superior izquierda queda fija y el grosor del trazo crece con él.
+   */
+  function startResize(e: RPointerEvent, a: InkAnnot) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const start = pad(toBox(bounds(a)), 3);
+    const root = rootRef.current!.getBoundingClientRect();
+    const anchorView: Point = [start.left, start.top];
+    const anchor = vp.convertToPdfPoint(...anchorView) as Point;
+    const target = e.currentTarget as Element;
+    try {
+      target.setPointerCapture(e.pointerId);
+    } catch {
+      /* el puntero ya no está activo */
+    }
+    let began = false;
+    const onMove = (ev: PointerEvent) => {
+      const x = ev.clientX - root.left - anchorView[0];
+      const y = ev.clientY - root.top - anchorView[1];
+      const f = Math.max(Math.max(x / start.width, y / start.height), 12 / Math.min(start.width, start.height));
+      if (!began && Math.abs(f - 1) < 0.01) return;
+      if (!began) p.onBegin();
+      began = true;
+      const at = (n: number) => Math.round(n * 100) / 100;
+      p.onChange(a.id, {
+        width: at(a.width * f),
+        strokes: a.strokes.map((s) =>
+          s.map(([px, py]) => [at(anchor[0] + (px - anchor[0]) * f), at(anchor[1] + (py - anchor[1]) * f)] as Point),
+        ),
+      });
+    };
+    const onUp = () => {
+      target.removeEventListener("pointermove", onMove as EventListener);
+      target.removeEventListener("pointerup", onUp);
+      target.removeEventListener("pointercancel", onUp);
+    };
+    target.addEventListener("pointermove", onMove as EventListener);
+    target.addEventListener("pointerup", onUp);
+    target.addEventListener("pointercancel", onUp);
+  }
 }
 
 function translate(a: Annot, dx: number, dy: number): Partial<Annot> {
@@ -413,7 +558,9 @@ function useInk(
       latest.current.viewport.convertToPdfPoint(e.clientX - box.left, e.clientY - box.top) as Point;
     const toView = ([x, y]: Point) => latest.current.viewport.convertToViewportPoint(x, y) as Point;
     const penDraws = () =>
-      (latest.current.style.penDraws && !isEditTool(latest.current.tool)) || latest.current.tool === "ink";
+      !latest.current.seal &&
+      ((latest.current.style.penDraws && !isEditTool(latest.current.tool) && latest.current.tool !== "sign") ||
+        latest.current.tool === "ink");
 
     const modeFor = (e: PointerEvent): "draw" | "erase" | null => {
       const q = latest.current;

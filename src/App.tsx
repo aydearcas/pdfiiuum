@@ -4,6 +4,10 @@ import TabBar from "./components/TabBar";
 import TopBar from "./components/TopBar";
 import ToolRail from "./components/ToolRail";
 import ExtensionDialog from "./components/ExtensionDialog";
+import SignatureDialog from "./components/SignatureDialog";
+import PasswordDialog from "./components/PasswordDialog";
+import { PasswordCancelled, setPasswordPrompt } from "./lib/passwords";
+import { getSignature, setSignature } from "./lib/signature";
 import DocTab, { type DocTabHandle, type TabInit, type TabSnapshot, type TabStatus } from "./components/DocTab";
 import { openDocument } from "./lib/document";
 import { DEFAULT_STYLE, type Tool, type ToolStyle } from "./lib/tools";
@@ -46,6 +50,7 @@ const TOOL_KEYS: Record<string, Tool> = {
   k: "strikeout",
   t: "text",
   d: "ink",
+  f: "sign",
   // Modo edición: solo en la app de escritorio (necesita PDFium).
   ...(hasPdfium ? { e: "edittext" as const } : {}),
 };
@@ -85,6 +90,29 @@ export default function App() {
   const [statuses, setStatuses] = useState<Record<string, TabStatus>>({});
   const [tool, setTool] = useState<Tool>("select");
   const [extensionOpen, setExtensionOpen] = useState(false);
+  const [signOpen, setSignOpen] = useState(false);
+  const closeSign = useCallback(() => setSignOpen(false), []);
+  // PDF cifrado: el diálogo de la contraseña responde a la petición que haya hecho pdf.js.
+  const [passwordAsk, setPasswordAsk] = useState<{
+    name?: string;
+    retry: boolean;
+    done(password: string | null): void;
+  } | null>(null);
+  useEffect(() => {
+    setPasswordPrompt(
+      (request) =>
+        new Promise((resolve) =>
+          setPasswordAsk({
+            ...request,
+            done: (password) => {
+              setPasswordAsk(null);
+              resolve(password);
+            },
+          }),
+        ),
+    );
+    return () => setPasswordPrompt(null);
+  }, []);
   const closeExtension = useCallback(() => setExtensionOpen(false), []);
   const [toolStyle, setToolStyle] = useState<ToolStyle>(() => ({
     ...DEFAULT_STYLE,
@@ -147,7 +175,7 @@ export default function App() {
       try {
         // Las anotaciones que ya tiene el PDF pasan a la capa editable (en el visor del
         // navegador, cuando el usuario empieza a anotar o editar).
-        const { pdf, baseline, deferred, signed } = await openDocument(file.bytes, { defer: isExtension });
+        const { pdf, baseline, deferred, signed } = await openDocument(file.bytes, { defer: isExtension, name: file.name });
         const id = newTabId();
         setTabs((all) => [
           ...all,
@@ -155,6 +183,7 @@ export default function App() {
         ]);
         setActiveId(id);
       } catch (e) {
+        if (e instanceof PasswordCancelled) return;
         notify(`No se pudo abrir «${file.name}»: ${e instanceof Error ? e.message : e}`, true);
       }
     },
@@ -303,6 +332,12 @@ export default function App() {
     return () => window.removeEventListener("contextmenu", onContextMenu);
   }, []);
 
+  /** Firmar sin firma guardada abre antes el recuadro para dibujarla. */
+  const chooseTool = useCallback((t: Tool) => {
+    if (t === "sign" && !getSignature()) setSignOpen(true);
+    else setTool(t);
+  }, []);
+
   // Atajos de teclado (actúan sobre la pestaña activa).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -322,6 +357,8 @@ export default function App() {
           const i = list.findIndex((t) => t.id === activeRef.current);
           setActiveId(list[(i + (e.shiftKey ? -1 : 1) + list.length) % list.length].id);
         });
+      // Sin documento, Ctrl+P no imprime la ventana de la app.
+      else if (mod && k === "p") go(() => tab?.print());
       else if (!tab) return;
       else if (mod && k === "s") go(() => tab.save(e.shiftKey));
       else if (mod && k === "f") go(() => tab.toggleSearch(true));
@@ -336,11 +373,11 @@ export default function App() {
       } else if (k === "escape") {
         tab.escape();
         setTool("select");
-      } else if (!mod && !e.altKey && TOOL_KEYS[k]) setTool(TOOL_KEYS[k]);
+      } else if (!mod && !e.altKey && TOOL_KEYS[k]) chooseTool(TOOL_KEYS[k]);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [handleOpen, closeTab]);
+  }, [handleOpen, closeTab, chooseTool]);
 
   // Arrastrar y soltar en modo navegador (en escritorio lo gestiona Tauri).
   const dropProps = isTauri
@@ -419,6 +456,8 @@ export default function App() {
         onOpen={handleOpen}
         onSave={() => active?.save(false)}
         onSaveAs={() => active?.save(true)}
+        onPrint={() => active?.print()}
+        onCertSign={() => active?.certSign()}
         onUndo={() => active?.undo()}
         onRedo={() => active?.redo()}
         onToggleSidebar={toggleSidebar}
@@ -439,7 +478,9 @@ export default function App() {
           tool={tool}
           style={toolStyle}
           disabled={!status}
-          onTool={setTool}
+          onTool={chooseTool}
+          onSign={() => chooseTool(tool === "sign" ? "select" : "sign")}
+          onEditSignature={() => setSignOpen(true)}
           onStyle={setToolStyle}
           onInsertImage={() => activeId && handles.current.get(activeId)?.insertImage()}
         />
@@ -481,6 +522,25 @@ export default function App() {
           {dragOver && <div className="drop-overlay">Suelta el PDF para abrirlo</div>}
         </div>
       </div>
+      {passwordAsk && (
+        <PasswordDialog
+          key={`${passwordAsk.name}-${passwordAsk.retry}`}
+          name={passwordAsk.name}
+          retry={passwordAsk.retry}
+          onDone={passwordAsk.done}
+        />
+      )}
+      {signOpen && (
+        <SignatureDialog
+          current={getSignature()}
+          onClose={closeSign}
+          onSave={(s) => {
+            setSignature(s);
+            setSignOpen(false);
+            setTool("sign");
+          }}
+        />
+      )}
       {toast && <div className={`toast${toast.error ? " error" : ""}`}>{toast.text}</div>}
     </div>
   );

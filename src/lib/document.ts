@@ -1,6 +1,7 @@
 // Abrir un documento: las anotaciones que ya tiene pasan a la capa editable de la app
 // y pdf.js muestra una copia del PDF sin ellas (para no dibujarlas dos veces).
-import { loadPdf, type PDFDocument } from "./pdf";
+import { closePdf, loadPdf, type PDFDocument } from "./pdf";
+import { passwordsSynced, passwordsVersion } from "./passwords";
 import { fromNative, type Annot, type Rect } from "./annotations";
 import { extractAnnotations, hasPdfium } from "./platform";
 
@@ -22,10 +23,24 @@ export interface OpenedDocument {
  * web, y PDFium corre en la app instalada, fuera del sandbox del navegador. Solo se le manda
  * cuando el usuario hace algo que lo necesita.
  */
-export async function openDocument(bytes: Uint8Array, { defer = false } = {}): Promise<OpenedDocument> {
+export async function openDocument(
+  bytes: Uint8Array,
+  { defer = false, name }: { defer?: boolean; name?: string } = {},
+): Promise<OpenedDocument> {
   const deferred = hasPdfium && defer;
-  const extracted = hasPdfium && !defer ? await extractAnnotations(bytes).catch(() => null) : null;
-  const pdf = await loadPdf(extracted?.display ?? bytes);
+  const before = passwordsVersion();
+  let extracted = hasPdfium && !defer ? await extractAnnotations(bytes).catch(() => null) : null;
+  let pdf = await loadPdf(extracted?.display ?? bytes, { name });
+  // PDF cifrado con una contraseña nueva: pdf.js la acaba de pedir y PDFium ya puede leerlo.
+  if (hasPdfium && !defer && !extracted && passwordsVersion() !== before) {
+    await passwordsSynced();
+    extracted = await extractAnnotations(bytes).catch(() => null);
+    if (extracted?.display) {
+      const shown = await loadPdf(extracted.display, { name });
+      closePdf(pdf);
+      pdf = shown;
+    }
+  }
   const baseline = extracted ? await withQuotes(pdf, extracted.annots.map(fromNative)) : [];
   return { pdf, baseline, deferred, signed: extracted?.signed ?? false };
 }

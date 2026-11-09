@@ -61,6 +61,8 @@ Para desarrollar: `npm run build:extension` compila el visor en `browser-extensi
 - Pestañas: reordenar arrastrando, sacar una pestaña a una ventana nueva o moverla a otra ventana.
 - Panel izquierdo con miniaturas o marcadores (índice) del PDF.
 - Búsqueda, zoom (se puede escribir el porcentaje), ajustar al ancho y giro de la vista. Los PDF se abren al 100 %.
+- PDF protegidos con contraseña: se pide al abrirlos y se puede leer, anotar, rellenar, editar e imprimir. Al guardar siguen protegidos con la misma contraseña. pdfiiuum solo la recuerda mientras está abierto (no la escribe en disco) y no se pide otra vez para otro PDF con la misma.
+- Imprimir (Ctrl+P): todas las páginas, la actual o un intervalo («1-3, 5, 8-»), con o sin las anotaciones; lo escrito en los formularios se imprime. La impresora, las copias y el papel se eligen en el diálogo de impresión de Windows.
 - Los enlaces del PDF se abren en el navegador o el programa de correo después de confirmarlos, sin sacar la ventana de pdfiiuum.
 
 ### Anotar
@@ -69,6 +71,9 @@ Para desarrollar: `npm run build:extension` compila el visor en `browser-extensi
 - Menú al seleccionar texto: comentar, resaltar, subrayar, tachar y copiar.
 - Panel lateral con todos los comentarios y resaltados del documento, en orden de lectura. El autor es el usuario de Windows.
 - Lápiz digital: dibuja con cualquier herramienta, borra con la goma o el botón lateral y agrupa los trazos de cada palabra.
+- Firma manuscrita (F): se dibuja una vez con el ratón, el dedo o el lápiz, se guarda en el equipo y se coloca con un clic en cualquier PDF. Queda como un dibujo que se mueve, se cambia de tamaño desde su esquina y se borra; no es una firma digital con certificado.
+- Firma digital con certificado (botón de la barra superior): con los certificados instalados en Windows (FNMT, DNIe u otra tarjeta). Es una firma PAdES (ETSI.CAdES.detached, SHA-256) como la de Autofirma o Acrobat, visible con un sello que se coloca con un clic o invisible. Windows pide el PIN si el certificado lo tiene; la clave nunca sale de Windows. El PDF firmado se guarda como un archivo nuevo (`…_firmado.pdf`), y se puede volver a firmar o seguir anotando sin invalidar la firma. No lleva sellado de tiempo de una autoridad externa (la hora es la del equipo) ni firma PDF protegidos con contraseña.
+- Los dibujos también se pueden agrandar o reducir desde su esquina.
 - Formularios PDF: se rellenan los campos de texto, casillas, opciones y desplegables, y lo escrito se guarda en el propio PDF (también en el visor del navegador y en PDF firmados, sin invalidar la firma). No se ejecuta el JavaScript de los formularios.
 
 ### Editar el PDF (solo en la app de escritorio)

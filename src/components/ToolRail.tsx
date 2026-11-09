@@ -10,6 +10,7 @@ import {
   MessageSquarePlus,
   MousePointer2,
   PenLine,
+  Signature as SignatureIcon,
   Strikethrough,
   TextCursorInput,
   Type,
@@ -20,6 +21,8 @@ import { FONT_SIZES, INK_WIDTHS, paletteFor, type AnnotKind } from "../lib/annot
 import { hasPdfium } from "../lib/platform";
 import { EDIT_FONTS } from "../lib/edit";
 import { isEditTool, type EditTool, type Tool, type ToolStyle } from "../lib/tools";
+import { setSignature, useSignature } from "../lib/signature";
+import { smoothPathD } from "../lib/ink";
 
 interface Props {
   tool: Tool;
@@ -28,6 +31,10 @@ interface Props {
   onTool(tool: Tool): void;
   onStyle(style: ToolStyle): void;
   onInsertImage(): void;
+  /** Elige la herramienta Firmar (o pide dibujar la firma si aún no hay ninguna). */
+  onSign(): void;
+  /** Dibujar otra firma. */
+  onEditSignature(): void;
 }
 
 const ANNOT_TOOLS: { tool: AnnotKind; icon: typeof Hand; label: string }[] = [
@@ -47,10 +54,13 @@ const EDIT_TOOLS: { tool: EditTool; icon: typeof Hand; label: string }[] = [
   { tool: "pages", icon: Files, label: "Organizar páginas" },
 ];
 
-export default function ToolRail({ tool, style, disabled, onTool, onStyle, onInsertImage }: Props) {
+export default function ToolRail(p: Props) {
+  const { tool, style, disabled, onTool, onStyle, onInsertImage } = p;
   const [optionsOpen, setOptionsOpen] = useState(false);
+  const signature = useSignature();
   // El texto añadido al PDF usa el color y el tamaño de la herramienta de texto.
-  const annotTool = tool === "addtext" ? "text" : tool !== "select" && tool !== "hand" && !isEditTool(tool) ? tool : null;
+  const annotTool =
+    tool === "addtext" ? "text" : tool !== "select" && tool !== "hand" && tool !== "sign" && !isEditTool(tool) ? tool : null;
 
   useEffect(() => {
     if (!optionsOpen) return;
@@ -76,6 +86,7 @@ export default function ToolRail({ tool, style, disabled, onTool, onStyle, onIns
           onClick={() => onTool(tool === t.tool ? "select" : t.tool)}
         />
       ))}
+      <IconButton icon={SignatureIcon} label="Firmar (F)" active={tool === "sign"} disabled={disabled} onClick={p.onSign} />
 
       {/* Modo edición: cambia el contenido del PDF, no son anotaciones. */}
       {hasPdfium && (
@@ -91,6 +102,54 @@ export default function ToolRail({ tool, style, disabled, onTool, onStyle, onIns
             />
           ))}
           <IconButton icon={ImagePlus} label="Insertar imagen en la página" disabled={disabled} onClick={onInsertImage} />
+        </div>
+      )}
+
+      {tool === "sign" && signature && (
+        <div className="tool-options-anchor">
+          <span className="divider horizontal" />
+          <button
+            className="color-btn"
+            aria-label="Firma guardada"
+            data-tip="Firma guardada"
+            onClick={(e) => {
+              e.stopPropagation();
+              setOptionsOpen((v) => !v);
+            }}
+          >
+            <span style={{ background: signature.color }} />
+          </button>
+          {optionsOpen && (
+            <div className="tool-options sign-options" onClick={(e) => e.stopPropagation()}>
+              {/* smoothPathD redondea a décimas: la firma (de alto 1) se dibuja a escala 100. */}
+              <svg className="sign-preview" viewBox={`-10 -10 ${signature.aspect * 100 + 20} 120`} aria-label="Tu firma">
+                {signature.strokes.map((s, i) => (
+                  <path
+                    key={i}
+                    className="ink"
+                    d={smoothPathD(s.map(([x, y]) => [x * 100, y * 100]))}
+                    stroke={signature.color}
+                    strokeWidth={signature.width * 100}
+                  />
+                ))}
+              </svg>
+              <span className="option-hint">Haz clic en la página para colocarla</span>
+              <div className="option-row">
+                <button className="chip" onClick={p.onEditSignature}>
+                  Dibujar otra
+                </button>
+                <button
+                  className="chip"
+                  onClick={() => {
+                    setSignature(null);
+                    onTool("select");
+                  }}
+                >
+                  Olvidar firma
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

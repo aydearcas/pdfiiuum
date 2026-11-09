@@ -114,10 +114,7 @@ unsafe fn with_page<T>(
     index: i32,
     f: impl FnOnce(FPDF_DOCUMENT, FPDF_PAGE, FPDF_TEXTPAGE) -> Result<T, String>,
 ) -> Result<T, String> {
-    let doc = b.FPDF_LoadMemDocument64(pdf, None);
-    if doc.is_null() {
-        return Err(format!("PDFium no pudo abrir el documento (error {})", b.FPDF_GetLastError()));
-    }
+    let doc = crate::pdf_engine::load_document(b, pdf)?;
     let result = (|| {
         if index < 0 || index >= b.FPDF_GetPageCount(doc) {
             return Err(format!("Página {} fuera de rango", index + 1));

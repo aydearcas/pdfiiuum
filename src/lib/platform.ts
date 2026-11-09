@@ -228,6 +228,76 @@ export async function bakeAnnotations(
   return new Uint8Array(await invoke<ArrayBuffer>("bake_annotations", framed(changes, pdf)));
 }
 
+// ---------- Firma con certificado ----------
+
+/** Certificado del almacén de Windows (src-tauri/src/cert_store.rs). */
+export interface CertInfo {
+  /** Huella SHA-1: identifica el certificado al firmar. */
+  id: string;
+  name: string;
+  issuer: string;
+  validFrom: number;
+  validTo: number;
+  /** Certificado de firma (no repudio), como el «FIRMA» del DNIe. */
+  signing: boolean;
+  /** La clave está en una tarjeta (DNIe o tarjeta criptográfica). */
+  card: boolean;
+}
+
+export interface SignRequest {
+  cert: string;
+  /** Fecha en formato PDF. */
+  date: string;
+  /** Sello visible (rectángulo en el espacio del PDF); sin él, la firma es invisible. */
+  seal: { page: number; rect: [number, number, number, number]; dateText: string } | null;
+}
+
+/** Lo dice Rust cuando el usuario cierra la ventana del PIN. */
+export const SIGN_CANCELLED = "Firma cancelada";
+
+/** En `npm run dev` sin la app: certificados de muestra para probar la interfaz. */
+const DEMO_CERTS = import.meta.env.DEV && !hasPdfium;
+export const canSignDigitally = hasPdfium || DEMO_CERTS;
+
+export async function listCertificates(): Promise<CertInfo[]> {
+  if (isExtension) return (await call<CertInfo[]>("certificates", null)).result;
+  if (isTauri) return invoke<CertInfo[]>("list_certificates");
+  if (DEMO_CERTS) {
+    const year = 365 * 24 * 3600 * 1000;
+    return [
+      { id: "demo-firma", name: "ESPAÑOL ESPAÑOL, JUAN (FIRMA)", issuer: "AC DNIE 004", validFrom: Date.now() - year, validTo: Date.now() + year, signing: true, card: true },
+      { id: "demo-fnmt", name: "ESPAÑOL ESPAÑOL JUAN - 99999999R", issuer: "AC FNMT Usuarios", validFrom: Date.now() - year, validTo: Date.now() + 2 * year, signing: true, card: false },
+      { id: "demo-caducado", name: "CERTIFICADO ANTIGUO", issuer: "AC FNMT Usuarios", validFrom: Date.now() - 5 * year, validTo: Date.now() - year, signing: true, card: false },
+    ];
+  }
+  throw new Error("La firma con certificado necesita la app de escritorio.");
+}
+
+/**
+ * Firma el PDF y lo guarda como un archivo nuevo. En escritorio se elige antes dónde (así,
+ * si se cancela, Windows no llega a pedir el PIN). Devuelve null si se cancela el diálogo.
+ */
+export async function signPdf(
+  pdf: Uint8Array,
+  request: SignRequest,
+  suggestedName: string,
+): Promise<{ path: string; bytes: Uint8Array } | null> {
+  if (isTauri) {
+    const target = await chooseTarget(suggestedName, null, true);
+    if (!target) return null;
+    const out = await invoke<ArrayBuffer>("sign_pdf", framed(request, pdf), {
+      headers: { path: encodeURIComponent(target) },
+    });
+    return { path: target, bytes: new Uint8Array(out) };
+  }
+  if (isExtension) {
+    const bytes = (await call("sign", request, pdf)).bytes!;
+    const target = await savePdf(bytes, suggestedName, null, true);
+    return target ? { path: target, bytes } : null;
+  }
+  throw new Error("Certificado de muestra: para firmar de verdad, usa la app de escritorio.");
+}
+
 /** Navegador: descarga el PDF a la carpeta de descargas, como el botón del visor del navegador. */
 export function downloadPdf(bytes: Uint8Array, name: string) {
   const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/pdf" }));

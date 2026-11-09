@@ -1,9 +1,12 @@
+#[cfg(windows)]
+mod cert_store;
 mod extension_setup;
 pub mod native_host;
 mod page_stream;
 mod pdf_edit;
 mod pdf_pages;
 mod pdf_engine;
+mod pdf_sign;
 mod windows;
 
 use std::path::{Path, PathBuf};
@@ -287,6 +290,37 @@ async fn bake_annotations(request: Request<'_>, pdfium: tauri::State<'_, PdfiumP
 }
 
 /// Nombre de usuario de Windows: autor de los comentarios.
+/// Contraseña que ha escrito el usuario para abrir un PDF cifrado (solo dura esta sesión).
+#[tauri::command]
+fn add_password(password: String) {
+    pdf_engine::add_password(&password);
+}
+
+/// Certificados del almacén de Windows con los que se puede firmar.
+#[tauri::command]
+async fn list_certificates() -> Result<Vec<cert_store::CertInfo>, String> {
+    tauri::async_runtime::spawn_blocking(cert_store::list).await.map_err(|e| e.to_string())?
+}
+
+/// Cuerpo: [JSON {cert, date, seal}][PDF]; cabecera `path`. Firma el PDF con el certificado,
+/// lo escribe y lo devuelve. Windows pide el PIN si hace falta (sobre la ventana de la app).
+#[tauri::command]
+async fn sign_pdf(request: Request<'_>, window: tauri::Window) -> Result<Response, String> {
+    let path = target_path(&request)?;
+    let (json, pdf) = split_framed(raw_body(&request)?)?;
+    let req: pdf_sign::SignRequest = serde_json::from_slice(json).map_err(|e| e.to_string())?;
+    let pdf = pdf.to_vec();
+    let hwnd = window.hwnd().map(|h| h.0 as isize).unwrap_or(0);
+    tauri::async_runtime::spawn_blocking(move || {
+        let key = cert_store::open_key(&req.cert, hwnd)?;
+        let out = pdf_sign::sign_pdf(&pdf, &key, &req.opts)?;
+        write_atomic(&path, &out)?;
+        Ok(Response::new(out))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 fn user_name() -> String {
     pdf_engine::default_author()
@@ -362,6 +396,9 @@ pub fn run() {
             extract_pages,
             bake_annotations,
             user_name,
+            add_password,
+            list_certificates,
+            sign_pdf,
             open_external,
             extension_setup::extension_info,
             extension_setup::open_extension_folder,

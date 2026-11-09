@@ -190,8 +190,17 @@ fn call(dll: &Path, current: &[u8], cmd: &str, args: Value) -> Result<(Value, Op
     struct Name {
         name: String,
     }
+    #[derive(Deserialize)]
+    struct Password {
+        password: String,
+    }
     match cmd {
         "user_name" => Ok((json!(pdf_engine::default_author()), None, false)),
+        "add_password" => {
+            let Password { password } = arg(args)?;
+            pdf_engine::add_password(&password);
+            Ok((Value::Null, None, false))
+        }
         "extract_annotations" => {
             let ex = pdf_engine::extract_annotations(dll, current)?;
             Ok((json!({ "annots": ex.annots, "signed": ex.signed }), ex.display, false))
@@ -223,6 +232,14 @@ fn call(dll: &Path, current: &[u8], cmd: &str, args: Value) -> Result<(Value, Op
         "bake_annotations" => {
             let Bake { remove, add } = arg(args)?;
             Ok((Value::Null, Some(pdf_engine::apply_annotations(dll, current, &remove, &add)?), true))
+        }
+        "certificates" => Ok((serde_json::to_value(crate::cert_store::list()?).map_err(|e| e.to_string())?, None, false)),
+        "sign" => {
+            let req: crate::pdf_sign::SignRequest = arg(args)?;
+            // La petición del PIN, sobre el navegador (que es la ventana activa al pulsar «Firmar»).
+            let hwnd = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() } as isize;
+            let key = crate::cert_store::open_key(&req.cert, hwnd)?;
+            Ok((Value::Null, Some(crate::pdf_sign::sign_pdf(current, &key, &req.opts)?), true))
         }
         "open_in_app" => {
             let Name { name } = arg(args)?;

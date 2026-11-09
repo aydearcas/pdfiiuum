@@ -5,7 +5,11 @@ import { loadOutline, type OutlineNode } from "../lib/outline";
 import SearchBar from "./SearchBar";
 import SelectionMenu, { type MenuItem } from "./SelectionMenu";
 import Viewer, { type FindStatus, type ViewState, type ViewerHandle } from "./Viewer";
-import { closePdf, type PDFDocument } from "../lib/pdf";
+import { closePdf, loadPdf, type PDFDocument } from "../lib/pdf";
+import { printPages } from "../lib/print";
+import PrintDialog, { type PrintOptions } from "./PrintDialog";
+import CertSignDialog from "./CertSignDialog";
+import type { SealPlacement } from "./AnnotationLayer";
 import CommentsPanel, { sortItems, type PanelItem } from "./CommentsPanel";
 import { bounds, diffAnnots, newId, pdfDate, toNative, type Annot, type MarkupKind } from "../lib/annotations";
 import { openDocument } from "../lib/document";
@@ -30,6 +34,9 @@ import {
   saveAnnotated,
   savePdf,
   savesInPlace,
+  signPdf,
+  SIGN_CANCELLED,
+  type CertInfo,
 } from "../lib/platform";
 
 /** Documento con el que se crea una pestaña. */
@@ -92,6 +99,10 @@ export interface DocTabHandle {
   openInApp(): Promise<void>;
   /** Visor del navegador: descarga el PDF tal como se ve (con las anotaciones sin guardar). */
   download(): Promise<void>;
+  /** Abre el diálogo de imprimir. */
+  print(): void;
+  /** Abre el diálogo de firmar con certificado. */
+  certSign(): void;
 }
 
 interface Props {
@@ -121,6 +132,16 @@ const EDIT_HINTS: Record<EditTool, string> = {
   pages: "Selecciona páginas en el panel (Ctrl o Mayús para varias) · arrástralas para reordenar · Supr las borra",
 };
 
+/** Sello de la firma con certificado, en puntos. */
+const SEAL_WIDTH = 210;
+const SEAL_HEIGHT = 60;
+
+/** Fecha y hora del sello: «09/11/2026 22:15:03». */
+function sealDate(d: Date): string {
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${two(d.getDate())}/${two(d.getMonth() + 1)}/${d.getFullYear()} ${two(d.getHours())}:${two(d.getMinutes())}:${two(d.getSeconds())}`;
+}
+
 /** Paso del historial del modo edición: el PDF anterior y si el cambio fue de páginas. */
 interface EditStep {
   bytes: Uint8Array;
@@ -140,6 +161,10 @@ export default function DocTab(p: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [printOpen, setPrintOpen] = useState(false);
+  const [certOpen, setCertOpen] = useState(false);
+  /** Certificado elegido mientras se coloca el sello en la página. */
+  const [sealCert, setSealCert] = useState<CertInfo | null>(null);
   const history = useAnnotations(p.init.annots ?? p.init.baseline);
   const { annots } = history;
   // Cambios respecto a lo guardado en el PDF (nuevas, modificadas o borradas).
@@ -421,12 +446,13 @@ export default function DocTab(p: Props) {
         setSelectedId(a.id);
         setEditingId(a.id);
         setTool("select");
-      } else if (a.kind === "text") {
+      } else if (a.kind === "text" || tool === "sign") {
+        // La firma recién colocada queda seleccionada para moverla o cambiarle el tamaño.
         setSelectedId(a.id);
         setTool("select");
       }
     },
-    [history.add, setTool, author, loadExisting],
+    [history.add, setTool, author, loadExisting, tool],
   );
 
   const onDelete = useCallback(
@@ -436,6 +462,107 @@ export default function DocTab(p: Props) {
       setEditingId((s) => (s === annotId ? null : s));
     },
     [history.remove],
+  );
+
+  // ---------- Imprimir ----------
+
+  /**
+   * Con anotaciones se imprime el PDF con todas escritas (también las que no se han guardado);
+   * sin ellas, la copia que se ve, a la que PDFium ya se las ha quitado. Lo escrito en el
+   * formulario se imprime en los dos casos.
+   */
+  const runPrint = useCallback(
+    async ({ pages, annotations }: PrintOptions, onProgress: (done: number, total: number) => void, signal: AbortSignal) => {
+      let temp: PDFDocument | null = null;
+      try {
+        let pdf: PDFDocument;
+        if (annotations) {
+          const d = docRef.current;
+          const { remove, add, dirty: pending } = changesRef.current;
+          if (pending) {
+            await ensureEditable();
+            const filled = await withForm();
+            temp = await loadPdf(await bakeAnnotations(filled, { remove, add: add.map(toNative) }));
+          } else if (d.baseline.length) {
+            // Lo que se ve es la copia sin anotaciones: se imprime el archivo, que sí las tiene.
+            temp = await loadPdf(await withForm());
+          }
+          pdf = temp ?? d.pdf;
+        } else {
+          // Visor del navegador: hasta leerlas con PDFium, pdf.js muestra las anotaciones del PDF.
+          await ensureEditable();
+          pdf = docRef.current.pdf;
+        }
+        await printPages({ pdf, pages, onProgress, signal });
+      } catch (e) {
+        notify(`No se pudo imprimir: ${e instanceof Error ? e.message : e}`, true);
+      } finally {
+        if (temp) closePdf(temp);
+      }
+    },
+    [ensureEditable, withForm, notify],
+  );
+
+  // ---------- Firma con certificado ----------
+
+  /**
+   * Firma lo que se ve (con las anotaciones y el formulario sin guardar ya escritos) y lo guarda
+   * como un archivo nuevo, que pasa a ser el de la pestaña.
+   */
+  const certSign = useCallback(
+    async (cert: CertInfo, seal: { page: number; rect: [number, number, number, number] } | null) => {
+      setSealCert(null);
+      if (saving) return;
+      setSaving(true);
+      try {
+        await ensureEditable();
+        const d = docRef.current;
+        const { remove, add, dirty: pending } = changesRef.current;
+        const filled = await withForm();
+        const bytes = pending ? await bakeAnnotations(filled, { remove, add: add.map(toNative) }) : filled;
+        const stem = d.name.replace(/\.pdf$/i, "");
+        const name = `${stem.endsWith("_firmado") ? stem : `${stem}_firmado`}.pdf`;
+        const result = await signPdf(
+          bytes,
+          { cert: cert.id, date: pdfDate(), seal: seal && { ...seal, dateText: sealDate(new Date()) } },
+          name,
+        );
+        if (!result) return;
+        diskBytes.current = result.bytes;
+        setEdits({ past: [], future: [] });
+        const view = viewer.current?.viewState();
+        const reopened = await openDocument(result.bytes);
+        // Ya se sabe que está firmado: sin el aviso de «este PDF tiene firma digital».
+        signedNotice.current = true;
+        setDoc({ ...reopened, bytes: result.bytes, name: baseName(result.path), path: result.path, view });
+        history.reset(reopened.baseline);
+        clearSelection();
+        notify(`Firmado con el certificado de ${cert.name}: ${baseName(result.path)}`);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        if (message === SIGN_CANCELLED) notify("Firma cancelada");
+        else notify(`No se pudo firmar: ${message}`, true);
+      } finally {
+        setSaving(false);
+      }
+    },
+    [saving, ensureEditable, withForm, notify, history.reset, clearSelection],
+  );
+
+  // Cambiar a otra herramienta deja de colocar el sello.
+  useEffect(() => {
+    if (tool !== "select") setSealCert(null);
+  }, [tool]);
+
+  const sealPlacement = useMemo<SealPlacement | null>(
+    () =>
+      sealCert && {
+        width: SEAL_WIDTH,
+        height: SEAL_HEIGHT,
+        lines: ["Firmado digitalmente por", sealCert.name, `Fecha: ${sealDate(new Date())}`],
+        onPlace: (page, rect) => certSign(sealCert, { page: page - 1, rect }),
+      },
+    [sealCert, certSign],
   );
 
   // ---------- Modo edición ----------
@@ -658,7 +785,10 @@ export default function DocTab(p: Props) {
         onDelete(selectedId);
         return true;
       },
-      escape: clearSelection,
+      escape: () => {
+        setSealCert(null);
+        clearSelection();
+      },
       snapshot: () => ({
         path: docRef.current.path,
         name: docRef.current.name,
@@ -667,6 +797,14 @@ export default function DocTab(p: Props) {
         edited: docRef.current.bytes !== diskBytes.current || formDirtyRef.current,
       }),
       insertImage,
+      print: () => {
+        (document.activeElement as HTMLElement | null)?.blur();
+        setPrintOpen(true);
+      },
+      certSign: () => {
+        (document.activeElement as HTMLElement | null)?.blur();
+        setCertOpen(true);
+      },
       download: async () => {
         try {
           const d = docRef.current;
@@ -775,6 +913,7 @@ export default function DocTab(p: Props) {
           annots={annots}
           selectedId={selectedId}
           editingId={editingId}
+          seal={active ? sealPlacement : null}
           onPageChange={setPage}
           onScaleChange={setScale}
           onFindStatus={setFindStatus}
@@ -797,6 +936,9 @@ export default function DocTab(p: Props) {
           onEditPage={applyEdit}
         />
         {active && editMode && <div className="edit-hint">{EDIT_HINTS[tool as EditTool]}</div>}
+        {active && sealCert && (
+          <div className="edit-hint">Haz clic donde quieras la firma · Esc cancela</div>
+        )}
         {searchOpen && (
           <SearchBar
             status={findStatus}
@@ -836,6 +978,21 @@ export default function DocTab(p: Props) {
             },
           ]}
           onClose={closeTextMenu}
+        />
+      )}
+      {active && printOpen && (
+        <PrintDialog page={page} pageCount={doc.pdf.numPages} onPrint={runPrint} onClose={() => setPrintOpen(false)} />
+      )}
+      {active && certOpen && (
+        <CertSignDialog
+          onClose={() => setCertOpen(false)}
+          onSign={(cert, visible) => {
+            setCertOpen(false);
+            if (visible) {
+              setTool("select");
+              setSealCert(cert);
+            } else certSign(cert, null);
+          }}
         />
       )}
       {active && annotMenu && annotMenuItems.length > 0 && (

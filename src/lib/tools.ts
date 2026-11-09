@@ -3,7 +3,8 @@ import type { EditFont } from "./edit";
 
 /** Herramientas del modo edición (cambian el contenido del PDF; solo en escritorio). */
 export type EditTool = "edittext" | "addtext" | "objects" | "cover" | "pages";
-export type Tool = "select" | "hand" | AnnotKind | EditTool;
+/** «sign» coloca la firma manuscrita guardada (se crea como un dibujo). */
+export type Tool = "select" | "hand" | "sign" | AnnotKind | EditTool;
 
 export const EDIT_TOOLS: EditTool[] = ["edittext", "addtext", "objects", "cover", "pages"];
 export const isEditTool = (t: Tool): t is EditTool => (EDIT_TOOLS as Tool[]).includes(t);

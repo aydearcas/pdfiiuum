@@ -18,15 +18,60 @@ const ANNOT_STRIKEOUT: c_int = 12;
 const ANNOT_STAMP: c_int = 13;
 const ANNOT_INK: c_int = 15;
 const COLORTYPE_COLOR: u32 = 0;
+const APPEARANCE_NORMAL: u32 = 0;
 const ANNOT_FLAG_PRINT: c_int = 4;
 const RENDER_ANNOT: c_int = 0x01;
 const SAVE_INCREMENTAL: u32 = 1;
 const SAVE_NO_INCREMENTAL: u32 = 2;
+const ERR_PASSWORD: c_ulong = 4;
 
 /// Prefijo del campo NM con el que identificamos el texto insertado por la app.
 pub const TEXT_STAMP_PREFIX: &str = "pdfiiuum-text";
 
 pub(crate) type Bindings = Box<dyn PdfiumLibraryBindings>;
+
+/// Contraseñas que ha escrito el usuario en esta sesión (solo en memoria). Cualquier operación
+/// sobre un PDF cifrado lo abre con la que le sirva: así no hay que pasarla en cada llamada, y
+/// las copias que salen de él (guardadas, editadas) siguen abriéndose.
+static PASSWORDS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// Más que suficientes para una sesión; evita que crezca sin límite.
+const MAX_PASSWORDS: usize = 32;
+pub const PASSWORD_ERROR: &str = "El PDF está protegido con contraseña";
+
+/// Recuerda una contraseña para abrir los PDF cifrados de esta sesión.
+pub fn add_password(password: &str) {
+    if password.is_empty() || password.len() > 1024 {
+        return;
+    }
+    if let Ok(mut list) = PASSWORDS.lock() {
+        if !list.iter().any(|p| p == password) {
+            if list.len() >= MAX_PASSWORDS {
+                list.remove(0);
+            }
+            list.push(password.to_string());
+        }
+    }
+}
+
+/// Abre el PDF con PDFium: sin contraseña y, si la pide, con las de la sesión.
+pub(crate) unsafe fn load_document(b: &Bindings, pdf: &[u8]) -> Result<FPDF_DOCUMENT, String> {
+    let doc = b.FPDF_LoadMemDocument64(pdf, None);
+    if !doc.is_null() {
+        return Ok(doc);
+    }
+    let error = b.FPDF_GetLastError();
+    if error != ERR_PASSWORD {
+        return Err(format!("PDFium no pudo abrir el documento (error {error})"));
+    }
+    let list = PASSWORDS.lock().map(|l| l.clone()).unwrap_or_default();
+    for password in list.iter().rev() {
+        let doc = b.FPDF_LoadMemDocument64(pdf, Some(password));
+        if !doc.is_null() {
+            return Ok(doc);
+        }
+    }
+    Err(PASSWORD_ERROR.into())
+}
 
 static ENGINE: OnceLock<Result<Mutex<Bindings>, String>> = OnceLock::new();
 
@@ -86,10 +131,7 @@ pub fn apply_annotations(dll: &Path, pdf: &[u8], remove: &[[i32; 2]], annots: &[
     let author = default_author();
 
     unsafe {
-        let doc = b.FPDF_LoadMemDocument64(pdf, None);
-        if doc.is_null() {
-            return Err(format!("PDFium no pudo abrir el documento (error {})", b.FPDF_GetLastError()));
-        }
+        let doc = load_document(b, pdf)?;
         let result = (|| {
             let page_count = b.FPDF_GetPageCount(doc);
             let mut pages: Vec<i32> = annots.iter().map(|a| a.page).chain(remove.iter().map(|r| r[0])).collect();
@@ -191,10 +233,7 @@ pub fn extract_annotations(dll: &Path, pdf: &[u8]) -> Result<Extracted, String> 
     let guard = engine(dll)?.lock().map_err(|_| "PDFium está bloqueado".to_string())?;
     let b = &*guard;
     unsafe {
-        let doc = b.FPDF_LoadMemDocument64(pdf, None);
-        if doc.is_null() {
-            return Err(format!("PDFium no pudo abrir el documento (error {})", b.FPDF_GetLastError()));
-        }
+        let doc = load_document(b, pdf)?;
         let result = (|| {
             let mut annots = Vec::new();
             for p in 0..b.FPDF_GetPageCount(doc) {
@@ -250,21 +289,18 @@ unsafe fn read_existing(b: &Bindings, annot: FPDF_ANNOTATION, page: i32, index: 
     b.FPDFAnnot_GetRect(annot, &mut rc);
     let rect = [rc.left.min(rc.right), rc.bottom.min(rc.top), rc.left.max(rc.right), rc.bottom.max(rc.top)];
 
-    let (mut r, mut g, mut bl, mut a) = (0u32, 0u32, 0u32, 0u32);
-    let has_color = b.FPDFAnnot_GetColor(annot, COLORTYPE_COLOR as FPDFANNOT_COLORTYPE, &mut r, &mut g, &mut bl, &mut a) != 0;
     let default: [u8; 3] = match kind {
         "highlight" | "note" => [255, 212, 0],
         "underline" => [19, 163, 90],
         "text" => [17, 17, 17],
         _ => [226, 35, 26],
     };
-    let color = if has_color { [r as u8, g as u8, bl as u8] } else { default };
 
     let mut e = Existing {
         kind,
         page,
         index,
-        color,
+        color: default,
         rects: Vec::new(),
         point: None,
         rect: None,
@@ -330,7 +366,27 @@ unsafe fn read_existing(b: &Bindings, annot: FPDF_ANNOTATION, page: i32, index: 
         }
         _ => {}
     }
+    if kind != "text" {
+        if let Some(c) = annot_color(b, annot) {
+            e.color = c;
+        }
+    }
     Some(e)
+}
+
+/// Color (/C) de una anotación. PDFium no lo da si la anotación tiene apariencia (/AP), y las que
+/// guarda pdfiiuum la tienen: se le quita la apariencia antes de leerlo. Solo se llama con las que
+/// se van a leer como editables, que se quitan del PDF que se muestra (no se guarda nada de esto).
+unsafe fn annot_color(b: &Bindings, annot: FPDF_ANNOTATION) -> Option<[u8; 3]> {
+    let (mut r, mut g, mut bl, mut a) = (0u32, 0u32, 0u32, 0u32);
+    let mut get = || b.FPDFAnnot_GetColor(annot, COLORTYPE_COLOR as FPDFANNOT_COLORTYPE, &mut r, &mut g, &mut bl, &mut a) != 0;
+    if !get() {
+        b.FPDFAnnot_SetAP(annot, APPEARANCE_NORMAL as FPDF_ANNOT_APPEARANCEMODE, std::ptr::null());
+        if !get() {
+            return None;
+        }
+    }
+    Some([r as u8, g as u8, bl as u8])
 }
 
 /// Lee un valor de texto (/Contents, /T, /M…) de la anotación.
@@ -509,6 +565,11 @@ unsafe extern "C" fn write_block(this: *mut FPDF_FILEWRITE, data: *const c_void,
 }
 
 #[cfg(test)]
+pub(crate) fn tests_encrypt(pdf: &[u8], user: &str) -> Vec<u8> {
+    tests::encrypt(pdf, user, true)
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -554,8 +615,7 @@ mod tests {
         };
         let mut out = Vec::new();
         unsafe {
-            let doc = b.FPDF_LoadMemDocument64(pdf, None);
-            assert!(!doc.is_null());
+            let doc = load_document(b, pdf).unwrap();
             let mut info: FPDF_FORMFILLINFO = std::mem::zeroed();
             info.version = 2;
             let form = b.FPDFDOC_InitFormFillEnvironment(doc, &mut info);
@@ -599,6 +659,106 @@ mod tests {
         assert_eq!(form_values(&dll, &ex.display.unwrap()), expected);
     }
 
+    /// Cifra el PDF con lopdf: AES-128 (PDF 1.6) o AES-256 (PDF 2.0), con contraseña de apertura.
+    pub(super) fn encrypt(pdf: &[u8], user: &str, aes256: bool) -> Vec<u8> {
+        use lopdf::encryption::crypt_filters::{Aes128CryptFilter, Aes256CryptFilter, CryptFilter};
+        use lopdf::{EncryptionState, EncryptionVersion, Object, Permissions};
+        use std::collections::BTreeMap;
+        use std::sync::Arc;
+        let mut doc = lopdf::Document::load_mem(pdf).unwrap();
+        let id = Object::string_literal(b"pdfiiuum-prueba!".to_vec());
+        doc.trailer.set("ID", Object::Array(vec![id.clone(), id]));
+        let key = [7u8; 32];
+        let state = if aes256 {
+            let filter: Arc<dyn CryptFilter> = Arc::new(Aes256CryptFilter);
+            EncryptionState::try_from(EncryptionVersion::V5 {
+                encrypt_metadata: true,
+                crypt_filters: BTreeMap::from([(b"StdCF".to_vec(), filter)]),
+                file_encryption_key: &key,
+                stream_filter: b"StdCF".to_vec(),
+                string_filter: b"StdCF".to_vec(),
+                owner_password: "propietario",
+                user_password: user,
+                permissions: Permissions::all(),
+            })
+        } else {
+            let filter: Arc<dyn CryptFilter> = Arc::new(Aes128CryptFilter);
+            EncryptionState::try_from(EncryptionVersion::V4 {
+                document: &doc,
+                encrypt_metadata: true,
+                crypt_filters: BTreeMap::from([(b"StdCF".to_vec(), filter)]),
+                stream_filter: b"StdCF".to_vec(),
+                string_filter: b"StdCF".to_vec(),
+                owner_password: "propietario",
+                user_password: user,
+                permissions: Permissions::all(),
+            })
+        }
+        .unwrap();
+        doc.encrypt(&state).unwrap();
+        let mut out = Vec::new();
+        doc.save_to(&mut out).unwrap();
+        out
+    }
+
+    /// ¿Lo abre PDFium sin contraseña?
+    fn opens_without_password(dll: &Path, pdf: &[u8]) -> bool {
+        let guard = engine(dll).unwrap().lock().unwrap();
+        unsafe {
+            let doc = guard.FPDF_LoadMemDocument64(pdf, None);
+            let ok = !doc.is_null();
+            if ok {
+                guard.FPDF_CloseDocument(doc);
+            }
+            ok
+        }
+    }
+
+    #[test]
+    fn encrypted_pdfs_open_with_the_session_password_and_stay_encrypted() {
+        let dll = Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/pdfium.dll");
+        let expected: Vec<(String, String)> = [("nombre", "Aythami"), ("persona.apellido", "de Armas"), ("acepto", "Yes")]
+            .iter()
+            .map(|(n, v)| (n.to_string(), v.to_string()))
+            .collect();
+        // Contraseñas solo de esta prueba: la lista es de todo el proceso.
+        for (aes256, password) in [(false, "clave-aes128-ñ"), (true, "clave-aes256-ñ")] {
+            let pdf = encrypt(&form_sample(), password, aes256);
+            assert!(!opens_without_password(&dll, &pdf));
+            assert_eq!(extract_annotations(&dll, &pdf).err().as_deref(), Some(PASSWORD_ERROR));
+
+            add_password(password);
+            let ink: Annot = serde_json::from_str(
+                r#"{"kind":"ink","page":0,"color":[29,63,174],"width":1.5,"strokes":[[[50,50],[80,70],[110,50]]]}"#,
+            )
+            .unwrap();
+            let saved = apply_annotations(&dll, &pdf, &[], &[ink]).unwrap();
+            // Lo guardado sigue pidiendo la contraseña y conserva el formulario.
+            assert!(!opens_without_password(&dll, &saved), "aes256={aes256}: se guardó sin cifrar");
+            assert_eq!(form_values(&dll, &saved), expected);
+            let ex = extract_annotations(&dll, &saved).unwrap();
+            assert_eq!(ex.annots.len(), 1);
+            assert_eq!(ex.annots[0].kind, "ink");
+            let display = ex.display.expect("copia sin anotaciones");
+            assert!(!opens_without_password(&dll, &display));
+            assert!(extract_annotations(&dll, &display).unwrap().annots.is_empty());
+
+            // Modo edición y páginas también abren el PDF cifrado y lo dejan cifrado.
+            let edit: crate::pdf_edit::PageEdit =
+                serde_json::from_str(r#"{"op":"cover","rect":[10,10,40,40]}"#).unwrap();
+            let edited = crate::pdf_edit::edit_page(&dll, &saved, 0, &edit).unwrap().pdf;
+            assert!(!opens_without_password(&dll, &edited));
+            let rotated = crate::pdf_pages::edit_pages(
+                &dll,
+                &edited,
+                &serde_json::from_str(r#"{"op":"rotate","pages":[0],"quarters":1}"#).unwrap(),
+            )
+            .unwrap();
+            assert!(!opens_without_password(&dll, &rotated));
+            assert_eq!(extract_annotations(&dll, &rotated).unwrap().annots.len(), 1);
+        }
+    }
+
     fn build_pdf(objects: &[&str]) -> Vec<u8> {
         let mut out = b"%PDF-1.7\n".to_vec();
         let mut offsets = Vec::new();
@@ -630,6 +790,30 @@ mod tests {
         assert_eq!(again.annots.len(), 1);
         // Sin firma, el guardado sigue siendo el de siempre.
         assert!(!extract_annotations(&dll, &crate::pdf_pages::tests_sample()).unwrap().signed);
+    }
+
+    #[test]
+    fn annotations_keep_their_color_after_saving() {
+        let dll = Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/pdfium.dll");
+        // La firma manuscrita (negra o azul) volvía roja, y los resaltados de otro color, amarillos.
+        let annots: Vec<Annot> = serde_json::from_value(serde_json::json!([
+            {"kind": "ink", "page": 0, "color": [17, 17, 17], "width": 1.2, "strokes": [[[50, 50], [80, 70], [110, 50]]]},
+            {"kind": "ink", "page": 0, "color": [29, 63, 174], "width": 1.2, "strokes": [[[50, 90], [80, 110]]]},
+            {"kind": "highlight", "page": 0, "color": [19, 163, 90], "rects": [[50, 150, 200, 165]]},
+            {"kind": "underline", "page": 0, "color": [226, 35, 26], "rects": [[50, 180, 200, 195]]},
+            {"kind": "note", "page": 0, "color": [29, 63, 174], "point": [220, 260]},
+            {"kind": "text", "page": 0, "color": [29, 63, 174], "rect": [50, 200, 200, 230], "text": "Hola", "fontSize": 12}
+        ]))
+        .unwrap();
+        let saved = apply_annotations(&dll, &crate::pdf_pages::tests_sample(), &[], &annots).unwrap();
+        let ex = extract_annotations(&dll, &saved).unwrap();
+        let mut got: Vec<(&str, [u8; 3])> = ex.annots.iter().map(|e| (e.kind, e.color)).collect();
+        let mut want: Vec<(&str, [u8; 3])> = annots.iter().map(|a| (a.kind.as_str(), a.color)).collect();
+        got.sort();
+        want.sort();
+        assert_eq!(got, want);
+        // La copia que se muestra sigue sin ninguna de ellas.
+        assert!(extract_annotations(&dll, &ex.display.unwrap()).unwrap().annots.is_empty());
     }
 
     /// PDFIIUUM_TEST_IN=entrada.pdf PDFIIUUM_TEST_OUT=salida.pdf cargo test -- --nocapture

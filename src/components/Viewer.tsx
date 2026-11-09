@@ -13,7 +13,7 @@ import { contains, type Annot, type MarkupKind, type Point } from "../lib/annota
 import { readSelection, type TextSelection } from "../lib/selection";
 import { isEditTool, isMarkupTool, type Tool, type ToolStyle } from "../lib/tools";
 import { isTauri, openExternal } from "../lib/platform";
-import AnnotationLayer, { type LayerCallbacks } from "./AnnotationLayer";
+import AnnotationLayer, { type LayerCallbacks, type SealPlacement } from "./AnnotationLayer";
 import EditLayer from "./EditLayer";
 import type { PageContent, PageEdit } from "../lib/edit";
 
@@ -53,6 +53,8 @@ interface Props extends LayerCallbacks {
   annots: Annot[];
   selectedId: string | null;
   editingId: string | null;
+  /** Colocando el sello de la firma con certificado. */
+  seal?: SealPlacement | null;
   initialView?: ViewState;
   ref?: Ref<ViewerHandle>;
   onPageChange(page: number): void;
@@ -400,6 +402,7 @@ export default function Viewer(props: Props) {
                 editingId={props.editingId}
                 tool={tool}
                 style={props.style}
+                seal={props.seal}
                 onCreate={props.onCreate}
                 onSelect={props.onSelect}
                 onBegin={props.onBegin}

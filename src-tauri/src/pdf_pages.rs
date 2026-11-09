@@ -27,10 +27,7 @@ pub enum PagesEdit {
 
 /// Abre el PDF, ejecuta `f` y devuelve el PDF guardado.
 unsafe fn with_doc(b: &Bindings, pdf: &[u8], f: impl FnOnce(FPDF_DOCUMENT, i32) -> Result<(), String>) -> Result<Vec<u8>, String> {
-    let doc = b.FPDF_LoadMemDocument64(pdf, None);
-    if doc.is_null() {
-        return Err(format!("PDFium no pudo abrir el documento (error {})", b.FPDF_GetLastError()));
-    }
+    let doc = crate::pdf_engine::load_document(b, pdf)?;
     let count = b.FPDF_GetPageCount(doc);
     let result = f(doc, count).and_then(|_| save(b, doc));
     b.FPDF_CloseDocument(doc);
@@ -101,10 +98,14 @@ pub fn edit_pages(dll: &Path, pdf: &[u8], edit: &PagesEdit) -> Result<Vec<u8>, S
                 }
                 PagesEdit::InsertFile { at, path, data } => {
                     let data = crate::pdf_edit::read_source(path, data, "el PDF", crate::PDF)?;
-                    let src = b.FPDF_LoadMemDocument64(&data, None);
-                    if src.is_null() {
-                        return Err("No se pudo abrir el PDF (¿está protegido con contraseña?)".into());
-                    }
+                    // Un PDF cifrado se abre si su contraseña ya se ha escrito en esta sesión.
+                    let src = crate::pdf_engine::load_document(b, &data).map_err(|e| {
+                        if e == crate::pdf_engine::PASSWORD_ERROR {
+                            "El PDF que se inserta está protegido con contraseña: ábrelo antes en pdfiiuum para escribirla".to_string()
+                        } else {
+                            format!("No se pudo abrir el PDF que se inserta ({e})")
+                        }
+                    })?;
                     let ok = b.FPDF_ImportPagesByIndex(doc, src, std::ptr::null(), 0, (*at).clamp(0, count));
                     b.FPDF_CloseDocument(src);
                     if ok == 0 {
@@ -122,10 +123,7 @@ pub fn extract_pages(dll: &Path, pdf: &[u8], pages: &[i32]) -> Result<Vec<u8>, S
     let guard = engine(dll)?.lock().map_err(|_| "PDFium está bloqueado".to_string())?;
     let b = &*guard;
     unsafe {
-        let src = b.FPDF_LoadMemDocument64(pdf, None);
-        if src.is_null() {
-            return Err(format!("PDFium no pudo abrir el documento (error {})", b.FPDF_GetLastError()));
-        }
+        let src = crate::pdf_engine::load_document(b, pdf)?;
         let result = (|| {
             check(pages, b.FPDF_GetPageCount(src))?;
             let out = b.FPDF_CreateNewDocument();

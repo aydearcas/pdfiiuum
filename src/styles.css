@@ -1711,3 +1711,335 @@ div.comments-empty p {
 .toast.error {
   border-color: var(--accent);
 }
+
+/* ---------- Imprimir ---------- */
+/* Las páginas preparadas solo existen mientras se imprime; en pantalla no se ven. */
+.print-container {
+  display: none;
+}
+@media print {
+  html,
+  body {
+    height: 100% !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+  body.printing > :not(.print-container) {
+    display: none !important;
+  }
+  body.printing .print-container {
+    display: block;
+    height: 100%;
+  }
+  .print-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    break-after: page;
+  }
+  .print-page:last-child {
+    break-after: auto;
+  }
+  .print-page img {
+    max-width: 100%;
+    max-height: 100%;
+  }
+}
+.print-options {
+  display: grid;
+  gap: 14px;
+  margin: 14px 0 4px;
+}
+.print-options fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  gap: 6px;
+}
+.print-options legend {
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.print-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.print-options input[type="radio"],
+.print-options input[type="checkbox"] {
+  accent-color: var(--accent);
+  margin: 0;
+}
+.print-range {
+  width: 150px;
+  height: 26px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+.print-range.invalid {
+  border-color: #ff7a73;
+}
+.print-progress {
+  height: 4px;
+  margin-top: 12px;
+  border-radius: 2px;
+  background: var(--bg);
+  overflow: hidden;
+}
+.print-progress > div {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s;
+}
+.dialog-foot .btn + .btn {
+  margin-left: 8px;
+}
+
+/* ---------- Firma manuscrita ---------- */
+.sign-pad {
+  position: relative;
+  margin: 12px 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+}
+.sign-pad svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 520 / 200;
+  cursor: crosshair;
+  touch-action: none;
+}
+.sign-pad .ink,
+.sign-preview .ink,
+.annot-svg .sign-ghost .ink {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.sign-baseline {
+  stroke: #c9ccd1;
+  stroke-width: 1;
+  stroke-dasharray: 6 5;
+}
+.sign-hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 38%;
+  text-align: center;
+  color: #9aa0a8;
+  font-size: 15px;
+  pointer-events: none;
+}
+.sign-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.sign-tools .swatch {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+}
+.sign-spacer {
+  flex: 1;
+}
+.sign-tools .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.sign-options .sign-preview {
+  display: block;
+  width: 100%;
+  height: 64px;
+  border-radius: 8px;
+  background: #fff;
+}
+.sign-options .option-hint {
+  display: block;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.annot-layer.creating.tool-sign {
+  cursor: none;
+  touch-action: none;
+}
+.annot-svg .sign-ghost {
+  opacity: 0.55;
+}
+.annot-svg .resize-handle {
+  fill: #fff;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  pointer-events: all;
+  cursor: nwse-resize;
+}
+
+/* ---------- Contraseña ---------- */
+.password-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.password-form .dialog-intro,
+.password-form .dialog-note,
+.password-form .dialog-error {
+  margin: 0;
+}
+.password-field {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px 0 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.password-field:focus-within {
+  border-color: var(--accent);
+}
+.password-field input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+}
+.password-field input[aria-invalid="true"] {
+  color: var(--text);
+}
+
+/* ---------- Firma con certificado ---------- */
+.cert-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(320px, 45vh);
+  overflow-y: auto;
+  margin: 12px 0;
+}
+.cert-empty {
+  padding: 14px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+}
+.cert-empty p {
+  margin: 0 0 6px;
+}
+.cert-empty ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.cert-item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.cert-item:hover:not(:disabled) {
+  background: var(--hover, rgba(255, 255, 255, 0.05));
+}
+.cert-item.active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.cert-item:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.cert-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.cert-meta {
+  grid-column: 1;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.cert-expired {
+  color: #ff7a73;
+  font-style: normal;
+}
+.cert-tags {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+.cert-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: rgba(127, 127, 127, 0.18);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.cert-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.cert-options .check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.annot-layer.placing-seal {
+  cursor: crosshair;
+}
+.seal-ghost {
+  position: absolute;
+  left: 0;
+  top: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 0.6em 0 1em;
+  border: 1px solid #1f4099;
+  border-left-width: 3px;
+  background: rgba(255, 255, 255, 0.85);
+  color: #1a1a1a;
+  font-family: Helvetica, Arial, sans-serif;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  pointer-events: none;
+  z-index: 5;
+}
+.seal-ghost span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

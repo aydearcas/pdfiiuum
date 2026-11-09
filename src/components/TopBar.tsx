@@ -3,11 +3,13 @@ import {
   AppWindow,
   ChevronDown,
   Download,
+  FileBadge,
   FolderOpen,
   Globe,
   Maximize,
   MoveHorizontal,
   PanelLeft,
+  Printer,
   Puzzle,
   Redo2,
   RotateCw,
@@ -19,7 +21,7 @@ import {
   ZoomOut,
 } from "lucide-react";
 import IconButton from "./IconButton";
-import { isExtension, isTauri } from "../lib/platform";
+import { canSignDigitally, isExtension, isTauri } from "../lib/platform";
 
 interface Props {
   fileName: string | null;
@@ -35,6 +37,8 @@ interface Props {
   onOpen(): void;
   onSave(): void;
   onSaveAs(): void;
+  onPrint(): void;
+  onCertSign(): void;
   onUndo(): void;
   onRedo(): void;
   onToggleSidebar(): void;
@@ -105,6 +109,15 @@ export default function TopBar(p: Props) {
           onClick={p.onSave}
         />
         <IconButton icon={SaveAll} label="Guardar como (Ctrl+Mayús+S)" disabled={!p.hasDoc || p.saving} onClick={p.onSaveAs} />
+        <IconButton icon={Printer} label="Imprimir (Ctrl+P)" disabled={!p.hasDoc} onClick={p.onPrint} />
+        {canSignDigitally && (
+          <IconButton
+            icon={FileBadge}
+            label="Firmar con certificado (FNMT, DNIe…)"
+            disabled={!p.hasDoc || p.saving}
+            onClick={p.onCertSign}
+          />
+        )}
         <span className="divider" />
         <IconButton icon={Undo2} label="Deshacer (Ctrl+Z)" disabled={!p.canUndo} onClick={p.onUndo} />
         <IconButton icon={Redo2} label="Rehacer (Ctrl+Y)" disabled={!p.canRedo} onClick={p.onRedo} />
