@@ -72,6 +72,38 @@ interface Props extends LayerCallbacks {
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 10;
 
+/**
+ * Cambia el zoom manteniendo quieto el punto del documento que hay en (x, y) (coordenadas de
+ * ventana); por defecto, el centro de la vista. pdf.js por sí solo conserva la esquina superior
+ * izquierda, así que medimos dónde cae ese punto en su página (en fracción de la página, que no
+ * depende del zoom ni del giro) y, tras aplicar el zoom, desplazamos para devolverlo a su sitio.
+ */
+function zoomAround(viewer: PDFViewer, container: HTMLElement, apply: () => void, at?: [number, number]) {
+  const rect = container.getBoundingClientRect();
+  const x = at?.[0] ?? rect.left + container.clientLeft + container.clientWidth / 2;
+  const y = at?.[1] ?? rect.top + container.clientTop + container.clientHeight / 2;
+  // Página bajo el punto o, si cae entre dos, la más cercana en vertical.
+  let anchor: { index: number; fx: number; fy: number } | null = null;
+  let best = Infinity;
+  for (let i = 0; i < viewer.pagesCount; i++) {
+    const div = viewer.getPageView(i)?.div;
+    if (!div) continue;
+    const box = div.getBoundingClientRect();
+    if (!box.width || !box.height) continue;
+    const dist = y < box.top ? box.top - y : y > box.bottom ? y - box.bottom : 0;
+    if (dist < best) {
+      best = dist;
+      anchor = { index: i, fx: (x - box.left) / box.width, fy: (y - box.top) / box.height };
+    }
+    if (dist === 0) break;
+  }
+  apply();
+  if (!anchor) return;
+  const box = viewer.getPageView(anchor.index).div.getBoundingClientRect();
+  container.scrollLeft += box.left + anchor.fx * box.width - x;
+  container.scrollTop += box.top + anchor.fy * box.height - y;
+}
+
 export default function Viewer(props: Props) {
   const { doc, tool, ref } = props;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -147,7 +179,7 @@ export default function Viewer(props: Props) {
       const factor = Math.exp(-e.deltaY / 400);
       const next = viewer.currentScale * factor;
       if (next < MIN_SCALE || next > MAX_SCALE) return;
-      viewer.updateScale({ scaleFactor: factor, origin: [e.clientX, e.clientY] });
+      zoomAround(viewer, container, () => viewer.updateScale({ scaleFactor: factor }), [e.clientX, e.clientY]);
     };
     container.addEventListener("wheel", onWheel, { passive: false });
 
@@ -280,13 +312,26 @@ export default function Viewer(props: Props) {
   useImperativeHandle(
     ref,
     () => ({
-      zoomIn: () => viewerRef.current?.increaseScale(),
-      zoomOut: () => viewerRef.current?.decreaseScale(),
+      zoomIn: () => {
+        const v = viewerRef.current;
+        if (v && v.currentScale < MAX_SCALE) zoomAround(v, containerRef.current!, () => v.increaseScale());
+      },
+      zoomOut: () => {
+        const v = viewerRef.current;
+        if (v && v.currentScale > MIN_SCALE) zoomAround(v, containerRef.current!, () => v.decreaseScale());
+      },
       setScale: (value) => {
         const v = viewerRef.current;
         if (!v) return;
-        if (typeof value === "number") v.currentScale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
-        else v.currentScaleValue = value;
+        if (typeof value === "number") {
+          const s = Math.min(MAX_SCALE, Math.max(MIN_SCALE, value));
+          zoomAround(v, containerRef.current!, () => (v.currentScale = s));
+        } else if (value === "page-fit") {
+          // «Página completa» enseña la página entera: aquí manda la posición de pdf.js.
+          v.currentScaleValue = value;
+        } else {
+          zoomAround(v, containerRef.current!, () => (v.currentScaleValue = value));
+        }
       },
       goToPage: (page) => {
         const v = viewerRef.current;
